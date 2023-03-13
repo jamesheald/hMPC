@@ -1,0 +1,25 @@
+?get rid of lists and tree_map, pass separate arrays for each layer - non array inputs
+
+alternative to converting tuple to list in decoder, prepending lists?
+
+most of time when running model forward is decoder (because it scales linearly with number of time steps)
+
+replace cnn with capsule?
+do i need to standardize images (and how) or is normalised (as is) fine?
+ultimately replace pen with myosuite finger to make it a finger painting task - could have flexion/extension determine finger up/down
+
+pen_xy0 options: always start in center of canvas (105/2, 105/2), randomise and use extra feature dimension in image, let the CNN choose
+consider learning initial neural states
+add control costs? e.g. squared velocity costs?
+add batch norm and other tricks to CNN, dropout?
+
+if there are l layers (e.g. 3), the top-layer alphas on the last l-1 time steps (e.g. 2) don't influence the state of the lowest layer and hence the objective
+when n_layer = 3, top-layer alphas at time 1 inlfuence the state of the lowest layer and hence the objective at time 3, and so on
+this leads to zeros in the biases and columns of weight matrix in last dense layer
+
+relu activation function, and to some extent binary image data, can lead to zero gradients scattered throughout CNN
+these gradients go to zero if you change relu to tanh and make data continuous on [0, 1], so not pathological, i don't think
+
+print values without tracer information
+jax.debug.print("{z_mean}", z_mean = z_mean)
+jax.debug.breakpoint() - didn't work for me
