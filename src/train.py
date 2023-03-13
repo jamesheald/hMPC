@@ -1,5 +1,6 @@
-from jax import value_and_grad, vmap, jit # random
+from jax import value_and_grad, vmap, jit, random
 import jax.numpy as np
+import numpy as onp
 import optax
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
@@ -7,8 +8,9 @@ from utils import keyGen, print_metrics, write_metrics_to_tensorboard
 from flax.metrics import tensorboard
 import time
 from copy import copy
+import gym
 
-def get_train_state(model, param, args, model_label):
+def get_train_state(model, param, args):
 	
 	lr_scheduler = optax.exponential_decay(args.step_size, args.decay_steps, args.decay_factor)
 
@@ -33,12 +35,10 @@ def create_tensorboard_writer(args):
 
 def loss_fn(params, state, inputs, target_outputs):
 
-	state.apply_fn
+	batch_predict_outputs = vmap(state.apply_fn, in_axes = (None, 0))
 
-	batch_predict_outputs = vmap(state.apply_fn, in_axes = (0))
-
-	# predict the fingertip position using the learned myosuite dynamics model
-	predicted_outputs = batch_predict_outputs(inputs)
+	# predict the next observation using the learned myosuite dynamics model
+	predicted_outputs = batch_predict_outputs(params, inputs)
 
 	# mean squared error between the predicted and actual (i.e. myosuite) fingertip position
 	loss = ((target_outputs - predicted_outputs) ** 2).mean()
@@ -57,29 +57,33 @@ def train_step(state, inputs, outputs):
 
 train_step_jit = jit(train_step)
 
-def collect_rollouts_from_random_policy(env, args):
+def collect_rollouts_from_random_policy(env, key, args):
 
 	# self.low_val = -1 * np.ones(self.env.action_space.low.shape)
 	# self.high_val = np.ones(self.env.action_space.high.shape)
 	# action = np.random.uniform(self.low_val, self.high_val, self.shape)
 	# preallocate memory for inputs
 
-	inputs = np.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0] + env.action_space.shape[0]))
-	outputs = np.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0]))
+	inputs = onp.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0] + env.action_space.shape[0]))
+	outputs = onp.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0]))
 
 	counter = 0
 
 	for rollout in range(args.n_rollouts):
 
-		observation = env.reset()
+		observation = env.reset()[0]
+
+		key, subkeys = keyGen(key, n_subkeys = args.time_steps)
 
 		for time in range(args.time_steps):
 
-			action = np.random.uniform(env.action_space.low, env.action_space.high, env.action_space.shape)
+			action = random.uniform(next(subkeys), shape = env.action_space.shape, minval = -1.0, maxval = 1.0)
+
+			# action = np.random.uniform(env.action_space.low, env.action_space.high, env.action_space.shape)
 
 			inputs[counter,:] = np.concatenate((observation, action))
 
-			observation, reward, done, info = env.step(action)
+			observation, reward, terminated, truncated, info = env.step(action)
 
 			outputs[counter,:] = observation
 
@@ -89,7 +93,11 @@ def collect_rollouts_from_random_policy(env, args):
 
 def reshape_dataset(dataset, args):
 
-	dataset = dataset.reshape((dataset.shape[0] / args.batch_size, args.batch_size, dataset.shape[1]))
+	# reshape
+	dataset = dataset.reshape((int(dataset.shape[0] / args.batch_size), args.batch_size, dataset.shape[1]))
+
+	# convert to jax numpy array
+	dataset = np.array(dataset)
 
 	return dataset
 
@@ -106,7 +114,7 @@ def optimise_model(model, params, args, key):
 	state, lr_scheduler = get_train_state(model, params, args)
 
 	# instantiat a myosuite environment
-	key, subkey = keyGen(key, n_subkeys = 1)
+	# key, subkey = keyGen(key, n_subkeys = 1)
 	env = gym.make(args.environment)
 	
 	# set early stopping criteria
@@ -119,7 +127,8 @@ def optimise_model(model, params, args, key):
 	for iteration in range(args.n_iterations):
 
 		# collect dataset
-		inputs, outputs = collect_rollouts_from_random_policy(env, args)
+		key, subkey = keyGen(key, n_subkeys = 1)
+		inputs, outputs = collect_rollouts_from_random_policy(env, next(subkey), args)
 
 		# reshape dataset into batches
 		inputs = reshape_dataset(inputs, args)
@@ -133,7 +142,7 @@ def optimise_model(model, params, args, key):
 			epoch_start_time = time.time()
 
 			# generate subkeys
-			key, training_subkeys = keyGen(key, n_subkeys = args.n_batches)
+			# key, training_subkeys = keyGen(key, n_subkeys = args.n_batches)
 
 			# initialise the losses and the timer
 			training_loss = 0
@@ -148,8 +157,8 @@ def optimise_model(model, params, args, key):
 				# training losses (average of 'print_every' batches)
 				training_loss = training_loss + mse / args.print_every
 
-			# if batch % args.print_every == 0:
-			if epoch % 50 == 0:
+				if batch % args.print_every == 0:
+			# if epoch % 50 == 0:
 
 					# end batches timer
 					batches_duration = time.time() - batch_start_time
@@ -165,14 +174,13 @@ def optimise_model(model, params, args, key):
 						
 					else:
 						
-
 						t_loss_through_training = np.append(t_loss_through_training, training_loss)
 
 					# re-initialise the losses and timer
 					training_loss = 0
 					batch_start_time = time.time()
 
-			if epoch % 50 == 0:
+			# if epoch % 50 == 0:
 
 				# # calculate loss on validation data
 				# _, (validation_loss, output) = eval_step_jit(state.params, state, state_myo, validate_dataset, kl_weight, next(validation_subkeys))

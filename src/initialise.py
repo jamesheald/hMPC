@@ -2,9 +2,7 @@ from jax import random
 from flax import linen as nn
 import jax.numpy as np
 from utils import keyGen
-from hLDS import VAE, myosuite_dynamics
-from flax.core.frozen_dict import freeze, unfreeze
-from train import get_train_state
+import gym
 
 class dynamics_model(nn.Module):
     output_dim: int
@@ -25,16 +23,13 @@ class dynamics_model(nn.Module):
         
         return x
 
-def initialise_model(args, train_dataset):
+def initialise_model(args):
 
     # explicitly generate a PRNG key
     key = random.PRNGKey(args.jax_seed)
 
     # generate the required number of subkeys
-    key, subkeys = keyGen(key, n_subkeys = 2) 
-
-    # define some additional hyperparameters
-    args.n_batches = len(train_dataset)
+    key, subkeys = keyGen(key, n_subkeys = 2)
     
     # define the model and initialise its parameters
     env = gym.make(args.environment)

@@ -36,7 +36,7 @@ def main():
     parser.add_argument('--print_every',             type = int, default = 1)
     parser.add_argument('--n_epochs',                type = int, default = 40)
     parser.add_argument('--n_iterations',            type = int, default = 1)
-    parser.add_argument('--batch_size',              type = int, default = 4) # 32
+    parser.add_argument('--batch_size',              type = int, default = 30)
     parser.add_argument('--min_delta',               type = float, default = 1e-3)
     parser.add_argument('--patience',                type = int, default = 2)
 
