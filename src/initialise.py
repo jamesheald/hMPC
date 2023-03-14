@@ -32,7 +32,7 @@ def initialise_model(args):
     key, subkeys = keyGen(key, n_subkeys = 2)
     
     # define the model and initialise its parameters
-    env = gym.make(args.environment)
+    env = gym.make(args.environment_name)
     model = dynamics_model(output_dim = env.observation_space.shape[0])
     params = model.init(x = np.ones(env.observation_space.shape[0] + env.action_space.shape[0]), rngs = {'params': next(subkeys)})
 

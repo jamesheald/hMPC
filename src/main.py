@@ -19,9 +19,17 @@ def main():
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
-    parser.add_argument('--environment',             default = 'Reacher-v4')
+    parser.add_argument('--environment_name',        default = 'Reacher-v4')
     parser.add_argument('--n_rollouts',              type = int, default = 30)
     parser.add_argument('--time_steps',              type = int, default = 50)
+
+    # CEM
+    parser.add_argument('--horizon',                 type = int, default = 7)
+    parser.add_argument('--n_sequences',             type = int, default = 200)
+    parser.add_argument('--n_iterations',            type = int, default = 3)
+    parser.add_argument('--n_elite',                 type = int, default = 20)
+    parser.add_argument('--alpha',                   type = float, default = 1.0)
+    parser.add_argument('--min_variance',            type = float, default = 0.001)
     # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
 
     # optimisation
@@ -33,9 +41,9 @@ def main():
     parser.add_argument('--step_size',               type = float, default = 0.001)
     parser.add_argument('--decay_steps',             type = int, default = 1)
     parser.add_argument('--decay_factor',            type = float, default = 0.9999)
-    parser.add_argument('--print_every',             type = int, default = 1)
+    parser.add_argument('--print_every',             type = int, default = 50)
     parser.add_argument('--n_epochs',                type = int, default = 40)
-    parser.add_argument('--n_iterations',            type = int, default = 1)
+    parser.add_argument('--n_model_iterations',      type = int, default = 500)
     parser.add_argument('--batch_size',              type = int, default = 30)
     parser.add_argument('--min_delta',               type = float, default = 1e-3)
     parser.add_argument('--patience',                type = int, default = 2)
