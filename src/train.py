@@ -160,7 +160,7 @@ def optimise_model(model, params, args, key):
 
         inputs, outputs, mean_cumulative_reward = collect_data(env, policy, state, next(subkey), args)
 
-        print("mean cumulative reward across rollouts:", mean_cumulative_reward)
+        print('iteration: {:d}, mean cumulative reward across rollouts: {:.4f}'.format(mean_cumulative_reward, iteration))
 
         # reshape dataset into batches
         inputs = reshape_dataset(inputs, args)
