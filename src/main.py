@@ -2,6 +2,8 @@ import argparse
 import pickle
 import os
 
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
 from initialise import initialise_model
 from train import optimise_model
 
@@ -19,7 +21,7 @@ def main():
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
-    parser.add_argument('--environment_name',        default = 'Reacher-v4')
+    parser.add_argument('--environment_name',        default = 'reacher')
     parser.add_argument('--n_rollouts',              type = int, default = 30)
     parser.add_argument('--time_steps',              type = int, default = 50)
 
@@ -30,6 +32,7 @@ def main():
     parser.add_argument('--n_elite',                 type = int, default = 20)
     parser.add_argument('--alpha',                   type = float, default = 1.0)
     parser.add_argument('--min_variance',            type = float, default = 0.001)
+    parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
     # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
 
     # optimisation

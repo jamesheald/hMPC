@@ -1,15 +1,16 @@
-from jax import value_and_grad, vmap, jit, random
+from jax import value_and_grad, vmap, jit, random, lax
+from functools import partial
 import jax.numpy as np
 import numpy as onp
 import optax
 from controllers import CEM
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, instantiate_a_gym_environment, print_metrics, write_metrics_to_tensorboard
+from utils import keyGen, print_metrics, write_metrics_to_tensorboard
 from flax.metrics import tensorboard
 import time
 from copy import copy
-import gym
+from brax import envs
 
 def get_train_state(model, param, args):
     
@@ -58,60 +59,124 @@ def train_step(state, inputs, outputs):
 
 train_step_jit = jit(train_step)
 
-def collect_data(env, policy, state, key, args):
+def collect_data(env, is_random_policy, state, key, args):
+
+    def environment_step(carry, inputs):
+
+        def get_random_policy(action_size, horizon, observation, state, key):
+
+            action = random.uniform(key, shape = (action_size,), minval = -1.0, maxval = 1.0)
+
+            return action
+
+        def get_mpc_action(action_size, horizon, observation, state, key):
+
+            action = controller.get_action(observation, state.apply_fn, state.params, horizon, key)
+
+            return action
+
+        env_state, cumulative_reward = carry
+        key, horizon = inputs
+
+        observation = np.copy(env_state.obs)
+
+        # currently, no need to pass horizon into these functions below, as args.horizon not used. horizon is already traced, i think due to scan on environment_step - need to use partial on that first
+        action = lax.cond(is_random_policy, partial(get_random_policy, env.action_size, horizon), partial(get_mpc_action, env.action_size, horizon), observation, state, key)
+
+        # horizon = min(args.time_steps - time, args.horizon) # can you instantiate this in a jitted function somehow
+
+        # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, key)
+        # action = controller.get_action(observation, state.apply_fn, state.params, horizon, key)
+
+        # inputs_dynamics_model = np.concatenate((observation, action))
+
+        # perform a step in the environment
+        # env_state = jit_env_step(env_state, action)
+        env_state = env.step(env_state, action)
+
+        next_observation = np.copy(env_state.obs)
+        
+        cumulative_reward += env_state.reward
+
+        carry = env_state, cumulative_reward
+        outputs = observation, action, next_observation
+
+        return carry, outputs
 
     # self.low_val = -1 * np.ones(self.env.action_space.low.shape)
     # self.high_val = np.ones(self.env.action_space.high.shape)
     # action = np.random.uniform(self.low_val, self.high_val, self.shape)
     # preallocate memory for inputs
 
-    inputs = onp.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0] + env.action_space.shape[0]))
-    outputs = onp.empty((args.n_rollouts * args.time_steps, env.observation_space.shape[0]))
+    inputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size + env.action_size))
+    outputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size))
 
-    counter = 0
+    jit_env_step = jit(env.step)
+
+    # counter = 0
 
     controller = CEM(env, args)
+
+    print('play with using pmap for running rollout in parallel?')
 
     cumulative_rewards = onp.empty(args.n_rollouts)
     for rollout in range(args.n_rollouts):
 
+        key, subkeys = keyGen(key, n_subkeys = 2)
+
         # randomly reset the environment for each new rollout
-        observation = env.reset()[0]
-
+        env_state = env.reset(rng = next(subkeys))
+        # env_state = env.reset(rng = jp.random_prngkey(seed = 0))
         cumulative_reward = 0
+        carry = env_state, cumulative_reward
 
-        key, subkeys = keyGen(key, n_subkeys = args.time_steps)
-        for time in range(args.time_steps):
+        subkeys = random.split(next(subkeys), args.time_steps)
+        # horizon = np.ones(args.time_steps) * args.horizon # same horizon for all time steps
+        horizon = np.concatenate((np.ones(args.time_steps - args.horizon + 1) * args.horizon, np.flip(np.arange(1, args.horizon)))) # truncate the horizon if it extends beyond the episode duration
+        inputs = subkeys, horizon
 
-            if policy == 'random':
+        (_, cumulative_reward), (observation, action, next_observation) = lax.scan(environment_step, carry, inputs)
+        
+        inputs_dynamics[rollout,:,:] = np.concatenate((observation, action), axis = 1)
+        outputs_dynamics[rollout,:,:] = next_observation
 
-                action = random.uniform(next(subkeys), shape = env.action_space.shape, minval = -1.0, maxval = 1.0)
+        # cumulative_reward = 0
+        # for time in range(args.time_steps):
 
-            elif policy == 'CEM':
+        #     if policy == 'random':
 
-                horizon = min(args.time_steps - time, args.horizon)
-                action = controller.get_action(observation, state.apply_fn, state.params, horizon, next(subkeys))
+        #         action = random.uniform(next(subkeys), shape = (env.action_size,), minval = -1.0, maxval = 1.0)
 
-            inputs[counter,:] = np.concatenate((observation, action))
+        #     elif policy == 'CEM':
 
-            observation, reward, terminated, truncated, info = env.step(action)
+        #         horizon = min(args.time_steps - time, args.horizon)
+        #         # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, next(subkeys))
+        #         action = controller.get_action(observation, state.apply_fn, state.params, horizon, next(subkeys))
 
-            cumulative_reward += reward
+        #     inputs[counter,:] = np.concatenate((observation, action))
 
-            outputs[counter,:] = observation
+        #     # perform a step in the environment
+        #     # env_state = jit_env_step(env_state, action)
+        #     env_state = env.step(env_state, action)
 
-            counter += 1
+        #     observation = env_state.obs[:]
+            
+        #     cumulative_reward += env_state.reward
+
+        #     outputs[counter,:] = observation
+
+        #     counter += 1
 
         cumulative_rewards[rollout] = cumulative_reward
 
     mean_cumulative_reward = cumulative_rewards.mean()
 
-    return inputs, outputs, mean_cumulative_reward
+    return inputs_dynamics, outputs_dynamics, mean_cumulative_reward
 
 def reshape_dataset(dataset, args):
 
-    # reshape
-    dataset = dataset.reshape((int(dataset.shape[0] / args.batch_size), args.batch_size, dataset.shape[1]))
+    # reshape a.size / a.shape[2]
+    dataset = dataset.reshape((int(dataset.size / dataset.shape[2] / args.batch_size), args.batch_size, dataset.shape[2]))
 
     # convert to jax numpy array
     dataset = np.array(dataset)
@@ -130,9 +195,8 @@ def optimise_model(model, params, args, key):
     # create train state
     state, lr_scheduler = get_train_state(model, params, args)
 
-    # instantiate a gym environment
-    key, subkey = keyGen(key, n_subkeys = 1)
-    env = instantiate_a_gym_environment(args, key)
+    # instantiate a brax environment
+    env = envs.create(env_name = args.environment_name)
 
     # set early stopping criteria
     early_stop = EarlyStopping(min_delta = args.min_delta, patience = args.patience)
@@ -152,19 +216,19 @@ def optimise_model(model, params, args, key):
 
         if iteration == 0:
 
-            policy = 'random'
+            is_random_policy = True
 
         else:
 
-            policy = 'CEM'
+            is_random_policy = False
 
-        inputs, outputs, mean_cumulative_reward = collect_data(env, policy, state, next(subkey), args)
+        inputs_dynamics, outputs_dynamics, mean_cumulative_reward = collect_data(env, is_random_policy, state, next(subkey), args)
 
-        print('iteration: {:d}, mean cumulative reward across rollouts: {:.4f}'.format(mean_cumulative_reward, iteration))
+        print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
 
         # reshape dataset into batches
-        inputs = reshape_dataset(inputs, args)
-        outputs = reshape_dataset(outputs, args)
+        inputs_dynamics = reshape_dataset(inputs_dynamics, args)
+        outputs_dynamics = reshape_dataset(outputs_dynamics, args)
 
         ###########################################
         ########## train dynamics model ###########
@@ -184,13 +248,13 @@ def optimise_model(model, params, args, key):
             batch_start_time = time.time()
 
             # loop over batches
-            for batch in range(1, inputs.shape[0] + 1):
+            for batch in range(1, inputs_dynamics.shape[0] + 1):
 
                 # train the  dynamics model
-                state, mse = train_step_jit(state, inputs[batch,:,:], outputs[batch,:,:])
+                state, mse = train_step_jit(state, inputs_dynamics[batch,:,:], outputs_dynamics[batch,:,:])
 
                 # average training loss
-                training_loss = training_loss + mse / (inputs.shape[0] + 1)
+                training_loss = training_loss + mse / (inputs_dynamics.shape[0] + 1)
 
             if epoch == 0 or epoch == args.n_epochs - 1:
 
@@ -230,7 +294,7 @@ def optimise_model(model, params, args, key):
 
 
 
-        if iteration % 50 == 0:
+        if iteration % 10 == 0:
 
             # save checkpoint
             checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = epoch)

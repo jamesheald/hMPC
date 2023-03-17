@@ -2,7 +2,7 @@ from jax import random
 from flax import linen as nn
 import jax.numpy as np
 from utils import keyGen
-import gym
+from brax import envs
 
 class dynamics_model(nn.Module):
     output_dim: int
@@ -32,8 +32,8 @@ def initialise_model(args):
     key, subkeys = keyGen(key, n_subkeys = 2)
     
     # define the model and initialise its parameters
-    env = gym.make(args.environment_name)
-    model = dynamics_model(output_dim = env.observation_space.shape[0])
-    params = model.init(x = np.ones(env.observation_space.shape[0] + env.action_space.shape[0]), rngs = {'params': next(subkeys)})
+    env = envs.create(env_name = args.environment_name)
+    model = dynamics_model(output_dim = env.observation_size)
+    params = model.init(x = np.ones(env.observation_size + env.action_size), rngs = {'params': next(subkeys)})
 
     return model, params, args, key

@@ -2,27 +2,6 @@ from jax import random, vmap
 import jax.numpy as np
 import gym
 
-def instantiate_a_gym_environment(args, key):
-
-    # create an instance of the myosuite environment
-    env = gym.make(args.environment_name)
-
-    # generate a random seed for the myosuite environment
-    env_seed = get_environment_seed(key)
-    # env.seed(env_seed)
-
-    # set the duration of each timestep of the myosuite simulation in seconds
-    # this should be done before calling env.reset to ensure that env.sim.data.qvel is in the correct units
-    # env = set_the_timestep_duration(env, args.myosuite_dt)
-    
-    return env
-
-def get_environment_seed(key):
-    
-    seed = int(random.randint(key, (), 0, np.iinfo(np.int32).max))
-    
-    return seed
-
 def keyGen(key, n_subkeys):
 	
 	keys = random.split(key, n_subkeys + 1)
