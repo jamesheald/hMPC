@@ -72,6 +72,7 @@ def collect_data(env, is_random_policy, state, key, args):
         def get_mpc_action(action_size, horizon, observation, state, key):
 
             action = controller.get_action(observation, state.apply_fn, state.params, horizon, key)
+            # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, key)
 
             return action
 
@@ -82,13 +83,6 @@ def collect_data(env, is_random_policy, state, key, args):
 
         # currently, no need to pass horizon into these functions below, as args.horizon not used. horizon is already traced, i think due to scan on environment_step - need to use partial on that first
         action = lax.cond(is_random_policy, partial(get_random_policy, env.action_size, horizon), partial(get_mpc_action, env.action_size, horizon), observation, state, key)
-
-        # horizon = min(args.time_steps - time, args.horizon) # can you instantiate this in a jitted function somehow
-
-        # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, key)
-        # action = controller.get_action(observation, state.apply_fn, state.params, horizon, key)
-
-        # inputs_dynamics_model = np.concatenate((observation, action))
 
         # perform a step in the environment
         # env_state = jit_env_step(env_state, action)
@@ -106,8 +100,8 @@ def collect_data(env, is_random_policy, state, key, args):
     # self.low_val = -1 * np.ones(self.env.action_space.low.shape)
     # self.high_val = np.ones(self.env.action_space.high.shape)
     # action = np.random.uniform(self.low_val, self.high_val, self.shape)
+    
     # preallocate memory for inputs
-
     inputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size + env.action_size))
     outputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size))
 
@@ -139,33 +133,6 @@ def collect_data(env, is_random_policy, state, key, args):
         
         inputs_dynamics[rollout,:,:] = np.concatenate((observation, action), axis = 1)
         outputs_dynamics[rollout,:,:] = next_observation
-
-        # cumulative_reward = 0
-        # for time in range(args.time_steps):
-
-        #     if policy == 'random':
-
-        #         action = random.uniform(next(subkeys), shape = (env.action_size,), minval = -1.0, maxval = 1.0)
-
-        #     elif policy == 'CEM':
-
-        #         horizon = min(args.time_steps - time, args.horizon)
-        #         # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, next(subkeys))
-        #         action = controller.get_action(observation, state.apply_fn, state.params, horizon, next(subkeys))
-
-        #     inputs[counter,:] = np.concatenate((observation, action))
-
-        #     # perform a step in the environment
-        #     # env_state = jit_env_step(env_state, action)
-        #     env_state = env.step(env_state, action)
-
-        #     observation = env_state.obs[:]
-            
-        #     cumulative_reward += env_state.reward
-
-        #     outputs[counter,:] = observation
-
-        #     counter += 1
 
         cumulative_rewards[rollout] = cumulative_reward
 
