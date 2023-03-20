@@ -1,8 +1,21 @@
 from jax import jit, vmap, random, lax
 import jax.numpy as np
+from functools import partial
 from utils import keyGen
 from reward import reward_function
 from flax import linen as nn
+
+class random_policy:
+
+    def __init__(self, env, args):
+
+        self.n_actions = env.action_size
+
+    def get_action(self, current_observation, dynamics_model, params, horizon, key):
+
+        action = random.uniform(key, shape = (self.n_actions,), minval = -1.0, maxval = 1.0)
+
+        return action
 
 class CEM:
 
@@ -44,7 +57,7 @@ class CEM:
         batch_estimate_return = vmap(estimate_return, in_axes = (None, 2))
         # jit_batch_estimate_return = jit(batch_estimate_return)
 
-        def update_action_sequence(action_mean, key):
+        def update_action_sequence(action_mean, key, self, current_observation):
 
             action_variance = 0.1 * np.ones((self.horizon, self.n_actions))
 
@@ -117,7 +130,8 @@ class CEM:
 
         # update the mean of the action sequence distribution
         subkeys = random.split(key, self.n_iterations)
-        action_mean, _ = lax.scan(update_action_sequence, action_mean, subkeys)
+        self, action_mean, key, current_observation
+        action_mean, _ = lax.scan(partial(update_action_sequence, self = self, current_observation = current_observation), action_mean, subkeys)
 
         # the mean of the optimised action sequence distribution (at the current time step) is the action to take in the environment
         best_action = action_mean[0, :]

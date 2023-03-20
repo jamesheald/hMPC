@@ -1,6 +1,7 @@
 from jax import value_and_grad, vmap, jit, random, lax
 from functools import partial
 import jax.numpy as np
+from brax import jumpy as jp
 import numpy as onp
 import optax
 from controllers import CEM
@@ -61,80 +62,76 @@ train_step_jit = jit(train_step)
 
 def collect_data(env, is_random_policy, state, key, args):
 
-    def environment_step(carry, inputs):
+    def environment_step(carry, inputs, n_actions):
 
-        def get_random_policy(action_size, horizon, observation, state, key):
+        def get_random_policy(n_actions, horizon, observation, state, key):
 
-            action = random.uniform(key, shape = (action_size,), minval = -1.0, maxval = 1.0)
+            action = random.uniform(key, shape = (n_actions,), minval = -1.0, maxval = 1.0)
 
             return action
 
-        def get_mpc_action(action_size, horizon, observation, state, key):
+        def get_mpc_action(n_actions, horizon, observation, state, key):
 
             action = controller.get_action(observation, state.apply_fn, state.params, horizon, key)
             # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, key)
 
             return action
 
-        env_state, cumulative_reward = carry
+        env_state, cumulative_reward, pred, state = carry
         key, horizon = inputs
 
         observation = np.copy(env_state.obs)
 
         # currently, no need to pass horizon into these functions below, as args.horizon not used. horizon is already traced, i think due to scan on environment_step - need to use partial on that first
-        action = lax.cond(is_random_policy, partial(get_random_policy, env.action_size, horizon), partial(get_mpc_action, env.action_size, horizon), observation, state, key)
+        action = lax.cond(pred, partial(get_random_policy, n_actions, horizon), partial(get_mpc_action, n_actions, horizon), observation, state, key)
 
         # perform a step in the environment
-        # env_state = jit_env_step(env_state, action)
-        env_state = env.step(env_state, action)
+        env_state = jit_env_step(env_state, action)
+        # env_state = env.step(env_state, action)
 
         next_observation = np.copy(env_state.obs)
         
         cumulative_reward += env_state.reward
 
-        carry = env_state, cumulative_reward
+        carry = env_state, cumulative_reward, pred, state
         outputs = observation, action, next_observation
 
         return carry, outputs
 
-    # self.low_val = -1 * np.ones(self.env.action_space.low.shape)
-    # self.high_val = np.ones(self.env.action_space.high.shape)
-    # action = np.random.uniform(self.low_val, self.high_val, self.shape)
-    
-    # preallocate memory for inputs
-    inputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size + env.action_size))
-    outputs_dynamics = onp.empty((args.n_rollouts, args.time_steps, env.observation_size))
+    def perform_rollout(carry, inputs, time_steps, horizon, n_actions):
 
-    jit_env_step = jit(env.step)
-
-    # counter = 0
-
-    controller = CEM(env, args)
-
-    print('play with using pmap for running rollout in parallel?')
-
-    cumulative_rewards = onp.empty(args.n_rollouts)
-    for rollout in range(args.n_rollouts):
+        is_random_policy, state, env, key = carry
 
         key, subkeys = keyGen(key, n_subkeys = 2)
 
         # randomly reset the environment for each new rollout
         env_state = env.reset(rng = next(subkeys))
-        # env_state = env.reset(rng = jp.random_prngkey(seed = 0))
-        cumulative_reward = 0
-        carry = env_state, cumulative_reward
-
-        subkeys = random.split(next(subkeys), args.time_steps)
-        # horizon = np.ones(args.time_steps) * args.horizon # same horizon for all time steps
-        horizon = np.concatenate((np.ones(args.time_steps - args.horizon + 1) * args.horizon, np.flip(np.arange(1, args.horizon)))) # truncate the horizon if it extends beyond the episode duration
-        inputs = subkeys, horizon
-
-        (_, cumulative_reward), (observation, action, next_observation) = lax.scan(environment_step, carry, inputs)
         
-        inputs_dynamics[rollout,:,:] = np.concatenate((observation, action), axis = 1)
-        outputs_dynamics[rollout,:,:] = next_observation
+        cumulative_reward = 0
+        
+        inner_carry = env_state, cumulative_reward, is_random_policy, state
 
-        cumulative_rewards[rollout] = cumulative_reward
+        subkeys = random.split(next(subkeys), time_steps)
+        truncated_horizon = np.concatenate((np.ones(time_steps - horizon + 1) * horizon, np.flip(np.arange(1, horizon)))) # truncate the horizon if it extends beyond the episode duration
+        inner_inputs = subkeys, truncated_horizon
+
+        # (_, cumulative_reward), (observation, action, next_observation) = lax.scan(partial(environment_step, pred = is_random_policy, n_actions = env.action_size, state = state), carry, inputs)
+        (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, n_actions = n_actions), inner_carry, inner_inputs)
+
+        carry = is_random_policy, state, env, key
+        outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
+
+        return carry, outputs
+
+    # jit_environment_step = jit(environment_step, static_argnums = (,))
+    jit_env_step = jit(env.step)
+
+    controller = CEM(env, args)
+
+    print('play with using pmap for running rollout in parallel?')
+
+    carry = is_random_policy, state, env, key
+    _, (inputs_dynamics, outputs_dynamics, cumulative_rewards) = jp.scan(partial(perform_rollout, time_steps = args.time_steps, horizon = args.horizon, n_actions = env.action_size), carry, None, length = args.n_rollouts)
 
     mean_cumulative_reward = cumulative_rewards.mean()
 
@@ -142,7 +139,7 @@ def collect_data(env, is_random_policy, state, key, args):
 
 def reshape_dataset(dataset, args):
 
-    # reshape a.size / a.shape[2]
+    # reshape 
     dataset = dataset.reshape((int(dataset.size / dataset.shape[2] / args.batch_size), args.batch_size, dataset.shape[2]))
 
     # convert to jax numpy array
