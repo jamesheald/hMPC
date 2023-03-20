@@ -1,7 +1,6 @@
 from jax import value_and_grad, vmap, jit, random, lax
 from functools import partial
 import jax.numpy as np
-from brax import jumpy as jp
 import numpy as onp
 import optax
 from controllers import CEM
@@ -98,9 +97,7 @@ def collect_data(env, is_random_policy, state, key, args):
 
         return carry, outputs
 
-    def perform_rollout(carry, inputs, time_steps, horizon, n_actions):
-
-        is_random_policy, state, env, key = carry
+    def perform_rollout(is_random_policy, state, env, args, key):
 
         key, subkeys = keyGen(key, n_subkeys = 2)
 
@@ -109,19 +106,20 @@ def collect_data(env, is_random_policy, state, key, args):
         
         cumulative_reward = 0
         
-        inner_carry = env_state, cumulative_reward, is_random_policy, state
+        carry = env_state, cumulative_reward, is_random_policy, state
 
-        subkeys = random.split(next(subkeys), time_steps)
-        truncated_horizon = np.concatenate((np.ones(time_steps - horizon + 1) * horizon, np.flip(np.arange(1, horizon)))) # truncate the horizon if it extends beyond the episode duration
-        inner_inputs = subkeys, truncated_horizon
+        subkeys = random.split(next(subkeys), args.time_steps)
+        truncated_horizon = np.concatenate((np.ones(args.time_steps - args.horizon + 1) * args.horizon, np.flip(np.arange(1, args.horizon)))) # truncate the horizon if it extends beyond the episode duration
+        inputs = subkeys, truncated_horizon
 
         # (_, cumulative_reward), (observation, action, next_observation) = lax.scan(partial(environment_step, pred = is_random_policy, n_actions = env.action_size, state = state), carry, inputs)
-        (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, n_actions = n_actions), inner_carry, inner_inputs)
+        (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, n_actions = env.action_size), carry, inputs)
 
-        carry = is_random_policy, state, env, key
         outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
 
-        return carry, outputs
+        return outputs
+
+    batch_perform_rollout = vmap(perform_rollout, in_axes = (None, None, None, None, 0))
 
     # jit_environment_step = jit(environment_step, static_argnums = (,))
     jit_env_step = jit(env.step)
@@ -130,8 +128,8 @@ def collect_data(env, is_random_policy, state, key, args):
 
     print('play with using pmap for running rollout in parallel?')
 
-    carry = is_random_policy, state, env, key
-    _, (inputs_dynamics, outputs_dynamics, cumulative_rewards) = jp.scan(partial(perform_rollout, time_steps = args.time_steps, horizon = args.horizon, n_actions = env.action_size), carry, None, length = args.n_rollouts)
+    subkeys = random.split(key, args.n_rollouts)
+    inputs_dynamics, outputs_dynamics, cumulative_rewards = batch_perform_rollout(is_random_policy, state, env, args, subkeys)
 
     mean_cumulative_reward = cumulative_rewards.mean()
 
