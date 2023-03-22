@@ -1,7 +1,6 @@
-from jax import jit, vmap, random, lax
+from jax import vmap, random, lax
 import jax.numpy as np
 from functools import partial
-from utils import keyGen
 from reward import reward_function
 from flax import linen as nn
 
@@ -88,5 +87,3 @@ class CEM:
         best_action = action_mean[0, :]
 
         return best_action
-
-    jit_get_action = jit(get_action)
