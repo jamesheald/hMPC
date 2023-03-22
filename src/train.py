@@ -1,7 +1,6 @@
 from jax import value_and_grad, vmap, jit, random, lax
 from functools import partial
 import jax.numpy as np
-import numpy as onp
 import optax
 from controllers import CEM
 from flax.training import checkpoints, train_state
@@ -119,7 +118,7 @@ def collect_data(env, is_random_policy, state, key, args):
 
         return outputs
 
-    batch_perform_rollout = vmap(perform_rollout, in_axes = (None, None, None, None, 0))
+    batch_perform_rollout = jit(vmap(perform_rollout, in_axes = (None, None, None, None, 0)))
 
     # jit_environment_step = jit(environment_step, static_argnums = (,))
     jit_env_step = jit(env.step)

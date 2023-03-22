@@ -20,12 +20,12 @@ def print_metrics(phase, duration, t_losses, v_losses = [], batch_range = [], lr
 		s1 = '\033[1m' + "Epoch {} in {:.1f} minutes" + '\033[0m'
 		print(s1.format(epoch, duration / 60))
 		
-	s2 = """  Training loss {:.4f}"""
+	s2 = """  Training loss {:.10f}"""
 	print(s2.format(t_losses.mean()))
 
 	if phase == "epoch":
 
-		s3 = """  Validation loss {:.4f}\n"""
+		s3 = """  Validation loss {:.10f}\n"""
 		print(s3.format(v_losses.mean()))
 
 def write_metrics_to_tensorboard(writer, t_losses, v_losses, epoch):
