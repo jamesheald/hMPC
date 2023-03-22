@@ -41,7 +41,6 @@ class CEM:
         return total_reward
 
     batch_estimate_return = vmap(estimate_return, in_axes = (None, None, None, 2))
-    # jit_batch_estimate_return = jit(batch_estimate_return)
 
     def update_action_sequence(self, predict, current_observation, action_mean, key):
 
@@ -51,7 +50,6 @@ class CEM:
         action_sequences = np.expand_dims(action_mean, 2) + np.expand_dims(np.sqrt(action_variance), 2) * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
-        # total_reward = jit_batch_estimate_return(current_observation, action_sequences)
         total_reward = self.batch_estimate_return(predict, current_observation, action_sequences)
 
         # assign a weight to each action sequence based on its total reward
