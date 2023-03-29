@@ -42,13 +42,16 @@ class MPPI:
 
     def update_action_sequence(self, predict, current_observation, action_sequence_mean, key):
 
-        noise_variance = 0.05
+        noise_variance = 0.1
 
         # sample noise to add to the mean of the action sequence distribution
         eps = noise_variance * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
 
         # add noise to the mean of the action sequence distribution
         action_sequences = np.expand_dims(action_sequence_mean, 2) + eps
+
+        # clip actions
+        action_sequences = np.clip(action_sequences, -1.0, 1.0)
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
         total_reward = self.batch_estimate_return(predict, current_observation, action_sequences)

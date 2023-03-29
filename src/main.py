@@ -2,6 +2,10 @@ import argparse
 import pickle
 import os
 
+# things to do
+# how to choose noise variance
+# smooth actions 
+
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 from initialise import initialise_model

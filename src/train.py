@@ -99,7 +99,7 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     
     cumulative_reward = 0
 
-    # initialise mean of the action sequence distribution
+    # initialise the mean of the action sequence distribution
     action_sequence_mean = np.zeros((horizon, env.action_size))
     
     carry = env_state, cumulative_reward, is_random_policy, state, action_sequence_mean
