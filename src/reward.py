@@ -20,7 +20,7 @@ def generate_target(key, disk_radius = 0.2):
 
 def reward_function(state, action):
 
-    target_position = np.array([0.14, 0.14]) # state[4:6]
+    target_position = state[4:6] # np.array([0.14, 0.14])
 
     fingertip_position = state[8:10]
 

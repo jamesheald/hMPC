@@ -262,7 +262,7 @@ def optimise_model(model, params, args, key):
                 # if batch == inputs.shape[0] + 1 and (epoch == args.n_epochs - 1 or epoch == 0):
 
                 #     # end batches timer
-                #     batches_duration = time.time() - batch_start_time
+                #     batches_duratconcatenateion = time.time() - batch_start_time
 
                 #     # print metrics
                 #     print_metrics("batch", batches_duration, training_loss, batch_range = [batch - args.print_every + 1, batch], 
@@ -315,7 +315,7 @@ def optimise_model(model, params, args, key):
                 #     break
 
         # render a rollout and save a gif
-        render_rollout(env, mppi, state, iteration, args, next(subkey))
+        # render_rollout(env, mppi, state, iteration, args, next(subkey))
 
     optimisation_duration = time.time() - optimisation_start_time
 

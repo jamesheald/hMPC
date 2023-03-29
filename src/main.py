@@ -5,6 +5,7 @@ import os
 # things to do
 # how to choose noise variance
 # smooth actions 
+# have ensemble of models
 
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 

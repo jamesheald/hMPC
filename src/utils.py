@@ -8,6 +8,12 @@ def keyGen(key, n_subkeys):
 	
 	return keys[0], (k for k in keys[1:])
 
+def stabilise_variance(log_var, var_min = 1e-16):
+	"""
+	var_min is added to the variances for numerical stability
+	"""
+	return np.log(np.exp(log_var) + var_min)
+
 def print_metrics(phase, duration, t_losses, v_losses = [], batch_range = [], lr = [], epoch = []):
 	
 	if phase == "batch":
