@@ -10,6 +10,8 @@ from flax.metrics import tensorboard
 import time
 from copy import copy
 from brax import envs
+from IPython.display import Image 
+from brax.io import image
 
 def get_train_state(model, param, args):
     
@@ -33,6 +35,39 @@ def create_tensorboard_writer(args):
     writer = tensorboard.SummaryWriter('runs/' + args.folder_name)
 
     return writer
+
+def render_rollout(env, controller, state, iteration, args, key):
+
+    # jit compile env.step
+    jit_env_step = jit(env.step)
+
+    key, subkeys = keyGen(key, n_subkeys = args.time_steps + 1)
+
+    env_state = env.reset(rng = next(subkeys))
+
+    # initialise the mean of the action sequence distribution
+    action_sequence_mean = np.zeros((args.horizon, env.action_size))
+
+    # perform rollout
+    rollout = []
+    for _ in range(args.time_steps):
+
+        observation = np.copy(env_state.obs)
+
+        if iteration == 0:
+
+            action, action_sequence_mean = random_action(env, controller, observation, state, action_sequence_mean, next(subkeys))
+
+        else:
+
+            action, action_sequence_mean = mpc_action(env, controller, observation, state, action_sequence_mean, next(subkeys))
+
+        env_state = jit_env_step(env_state, action)
+        rollout.append(env_state)
+    
+    # create and save a gif of the rollout
+    gif = Image(image.render(env.sys, [s.qp for s in rollout], width = 320, height = 240, fmt = 'gif'))
+    open('output_' + str(iteration) + '.gif', 'wb').write(gif.data)
 
 def loss_fn(params, state, inputs, target_outputs):
 
@@ -166,7 +201,7 @@ def optimise_model(model, params, args, key):
         ###########################################
 
         # collect dataset
-        key, subkey = keyGen(key, n_subkeys = 1)
+        key, subkey = keyGen(key, n_subkeys = 2)
 
         if iteration == 0:
 
@@ -278,6 +313,9 @@ def optimise_model(model, params, args, key):
                 #     print('Early stopping criteria met, breaking...')
                     
                 #     break
+
+        # render a rollout and save a gif
+        render_rollout(env, mppi, state, iteration, args, next(subkey))
 
     optimisation_duration = time.time() - optimisation_start_time
 

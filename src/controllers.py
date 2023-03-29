@@ -11,9 +11,9 @@ class MPPI:
         self.n_sequences = args.n_sequences
         self.n_actions = env.action_size
         self.horizon = args.horizon
-        self.n_elite = args.n_elite
-        self.alpha = args.alpha
-        self.min_variance = args.min_variance
+        # self.n_elite = args.n_elite
+        # self.alpha = args.alpha
+        # self.min_variance = args.min_variance
         self.reward_weighting_factor = args.reward_weighting_factor
 
     def predict_one_step(self, state, observation, action):
