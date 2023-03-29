@@ -42,11 +42,10 @@ class MPPI:
 
     def update_action_sequence(self, predict, current_observation, action_sequence_mean, key):
 
-        action_variance = 0.1 * np.ones((self.horizon, self.n_actions)) # 0.9 
+        noise_variance = 0.05
 
         # sample noise to add to the mean of the action sequence distribution
-        # print('the ones and expand_dims for variance seems madness')
-        eps = np.expand_dims(np.sqrt(action_variance), 2) * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
+        eps = noise_variance * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
 
         # add noise to the mean of the action sequence distribution
         action_sequences = np.expand_dims(action_sequence_mean, 2) + eps
