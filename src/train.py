@@ -2,7 +2,7 @@ from jax import value_and_grad, vmap, jit, random, lax
 from functools import partial
 import jax.numpy as np
 import optax
-from controllers import CEM
+from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
 from utils import keyGen, print_metrics, write_metrics_to_tensorboard
@@ -58,25 +58,25 @@ def train_step(state, inputs, outputs):
 
 train_step_jit = jit(train_step)
 
-def get_random_policy(env, controller, observation, state, key):
+def random_action(env, controller, observation, state, action_sequence_mean, key):
 
     action = random.uniform(key, shape = (env.action_size,), minval = -1.0, maxval = 1.0)
 
-    return action
+    return action, action_sequence_mean
 
-def get_mpc_action(env, controller, observation, state, key):
+def mpc_action(env, controller, observation, state, action_sequence_mean, key):
 
-    action = controller.get_action(observation, state, key)
+    action, action_sequence_mean = controller.get_action(observation, state, action_sequence_mean, key)
 
-    return action
+    return action, action_sequence_mean
 
 def environment_step(env, controller, carry, key):
 
-    env_state, cumulative_reward, pred, state = carry
+    env_state, cumulative_reward, is_random_policy, state, action_sequence_mean = carry
 
     observation = np.copy(env_state.obs)
 
-    action = lax.cond(pred, partial(get_random_policy, env, controller), partial(get_mpc_action, env, controller), observation, state, key)
+    action, action_sequence_mean = lax.cond(is_random_policy, partial(random_action, env, controller), partial(mpc_action, env, controller), observation, state, action_sequence_mean, key)
 
     # perform a step in the environment
     env_state = env.step(env_state, action)
@@ -85,7 +85,7 @@ def environment_step(env, controller, carry, key):
     
     cumulative_reward += env_state.reward
 
-    carry = env_state, cumulative_reward, pred, state
+    carry = env_state, cumulative_reward, is_random_policy, state, action_sequence_mean
     outputs = observation, action, next_observation
 
     return carry, outputs
@@ -98,12 +98,15 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     env_state = env.reset(rng = next(subkeys))
     
     cumulative_reward = 0
+
+    # initialise mean of the action sequence distribution
+    action_sequence_mean = np.zeros((horizon, env.action_size))
     
-    carry = env_state, cumulative_reward, is_random_policy, state
+    carry = env_state, cumulative_reward, is_random_policy, state, action_sequence_mean
 
     subkeys = random.split(next(subkeys), time_steps)
 
-    (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
+    (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
 
     outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
 
@@ -151,9 +154,9 @@ def optimise_model(model, params, args, key):
     # create tensorboard writer
     writer = create_tensorboard_writer(args)
 
-    cem = CEM(env, args)
+    mppi = MPPI(env, args)
 
-    batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = cem, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
+    batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
 
     # loop over iterations
     for iteration in range(args.n_model_iterations):
