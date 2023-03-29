@@ -58,16 +58,15 @@ def train_step(state, inputs, outputs):
 
 train_step_jit = jit(train_step)
 
-def get_random_policy(env, controller, horizon, observation, state, key):
+def get_random_policy(env, controller, observation, state, key):
 
     action = random.uniform(key, shape = (env.action_size,), minval = -1.0, maxval = 1.0)
 
     return action
 
-def get_mpc_action(env, controller, horizon, observation, state, key):
+def get_mpc_action(env, controller, observation, state, key):
 
-    action = controller.get_action(observation, state, horizon, key)
-    # action = controller.jit_get_action(observation, state.apply_fn, state.params, horizon, key)
+    action = controller.get_action(observation, state, key)
 
     return action
 
@@ -78,11 +77,9 @@ def environment_step(env, controller, carry, inputs):
 
     observation = np.copy(env_state.obs)
 
-    # currently, no need to pass horizon into these functions below, as args.horizon not used. horizon is already traced, i think due to scan on environment_step - need to use partial on that first
-    action = lax.cond(pred, partial(get_random_policy, env, controller), partial(get_mpc_action, env, controller), horizon, observation, state, key)
+    action = lax.cond(pred, partial(get_random_policy, env, controller), partial(get_mpc_action, env, controller), observation, state, key)
 
     # perform a step in the environment
-    # env_state = jit_env_step(env_state, action)
     env_state = env.step(env_state, action)
 
     next_observation = np.copy(env_state.obs)
@@ -109,7 +106,6 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     truncated_horizon = np.concatenate((np.ones(time_steps - horizon + 1) * horizon, np.flip(np.arange(1, horizon)))) # truncate the horizon if it extends beyond the episode duration
     inputs = subkeys, truncated_horizon
 
-    # (_, cumulative_reward), (observation, action, next_observation) = lax.scan(partial(environment_step, pred = is_random_policy, n_actions = env.action_size, state = state), carry, inputs)
     (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, inputs)
 
     outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
@@ -117,9 +113,6 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     return outputs
 
 def collect_data(env, is_random_policy, batch_perform_rollout, state, key, args):
-
-    # jit_environment_step = jit(environment_step, static_argnums = (,))
-    jit_env_step = jit(env.step)
 
     print('play with using pmap for running rollout in parallel?')
 
@@ -258,7 +251,7 @@ def optimise_model(model, params, args, key):
         if iteration % 10 == 0:
 
             # save checkpoint
-            checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = epoch)
+            checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = iteration)
 
 
             # if epoch % 50 == 0:

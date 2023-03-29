@@ -43,7 +43,7 @@ class CEM:
 
     def update_action_sequence(self, predict, current_observation, action_mean, key):
 
-        action_variance = 0.1 * np.ones((self.horizon, self.n_actions))
+        action_variance = 0.1 * np.ones((self.horizon, self.n_actions)) # 0.9
 
         # sample multiple action sequences from the action sequence distribution
         action_sequences = np.expand_dims(action_mean, 2) + np.expand_dims(np.sqrt(action_variance), 2) * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
@@ -61,7 +61,7 @@ class CEM:
 
         return action_mean, outputs
 
-    def get_action(self, current_observation, state, horizon, key):
+    def get_action(self, current_observation, state, key):
 
         # # find the elite action sequences (i.e. those associated with the highest reward)
         # elite_indices = np.argsort(total_reward)[-self.n_elite:]
