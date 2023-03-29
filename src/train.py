@@ -70,10 +70,9 @@ def get_mpc_action(env, controller, observation, state, key):
 
     return action
 
-def environment_step(env, controller, carry, inputs):
+def environment_step(env, controller, carry, key):
 
     env_state, cumulative_reward, pred, state = carry
-    key, horizon = inputs
 
     observation = np.copy(env_state.obs)
 
@@ -103,10 +102,8 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     carry = env_state, cumulative_reward, is_random_policy, state
 
     subkeys = random.split(next(subkeys), time_steps)
-    truncated_horizon = np.concatenate((np.ones(time_steps - horizon + 1) * horizon, np.flip(np.arange(1, horizon)))) # truncate the horizon if it extends beyond the episode duration
-    inputs = subkeys, truncated_horizon
 
-    (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, inputs)
+    (_, cumulative_reward, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
 
     outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
 
