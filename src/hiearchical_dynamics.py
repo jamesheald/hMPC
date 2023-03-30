@@ -123,19 +123,19 @@ class hierarchical_dynamics_model(nn.Module):
 
         key, subkeys = keyGen(key, n_subkeys = 2)
 
-        # infer latent codes
+        # infer the distributions of the latent codes
         p_z_state = self.state_encoder(state)
         p_z_action = self.action_encoder(action)
 
-        # sample latent codes
+        # sample the latent codes
         z_state = self.sampler(p_z_state, next(subkeys))
         z_action = self.sampler(p_z_action, next(subkeys))
 
-        # reconstruct state and action from sampled latent codes
+        # reconstruct the state and action from the sampled latent codes
         state_hat = self.state_decoder(z_state)
         action_hat = self.action_decoder(z_action)
 
-        # predict next state
+        # predict the next state
         next_state_hat = self.dynamics(state, action)
         next_z_state = self.dynamics_latent(z_state, z_action)
         next_state_hat_via_z = self.state_decoder(next_z_state)
