@@ -4,7 +4,7 @@ import os
 
 # things to do
 # dataset should be growing in size!
-# have option to rollout with ground truth dynamics
+# use scan and jit for rollout render
 # how to choose noise variance
 # smooth actions 
 # have ensemble of models

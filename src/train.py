@@ -66,17 +66,17 @@ def render_rollout(env, controller, state, iteration, args, key):
     cameras = []
     width = 320
     height = 240
-    for _ in range(200): # args.time_steps
+    for _ in range(args.time_steps):
 
         observation = np.copy(env_state.obs)
 
         if iteration == 0:
 
-            action, action_sequence_mean = random_action(env, controller, observation, state, action_sequence_mean, next(subkeys))
+            action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
 
         else:
 
-            action, action_sequence_mean = mpc_action(env, controller, observation, state, action_sequence_mean, next(subkeys))
+            action, action_sequence_mean = mpc_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
 
         env_state = jit_env_step(env_state, action)
         rollout.append(env_state)
@@ -110,15 +110,15 @@ def train_step(state, inputs, outputs):
 
 train_step_jit = jit(train_step)
 
-def random_action(env, controller, observation, state, action_sequence_mean, key):
+def random_action(controller, env, env_state, state, action_sequence_mean, key):
 
     action = random.uniform(key, shape = (env.action_size,), minval = -1.0, maxval = 1.0)
 
     return action, action_sequence_mean
 
-def mpc_action(env, controller, observation, state, action_sequence_mean, key):
+def mpc_action(controller, env, env_state, state, action_sequence_mean, key):
 
-    action, action_sequence_mean = controller.get_action(observation, state, action_sequence_mean, key)
+    action, action_sequence_mean = controller.get_action(env, env_state, state, action_sequence_mean, key)
 
     return action, action_sequence_mean
 
@@ -126,11 +126,10 @@ def environment_step(env, controller, carry, key):
 
     env_state, cumulative_reward, is_random_policy, state, action_sequence_mean = carry
 
+    action, action_sequence_mean = lax.cond(is_random_policy, partial(random_action, controller, env), partial(mpc_action, controller, env), env_state, state, action_sequence_mean, key)
+
     observation = np.copy(env_state.obs)
 
-    action, action_sequence_mean = lax.cond(is_random_policy, partial(random_action, env, controller), partial(mpc_action, env, controller), observation, state, action_sequence_mean, key)
-
-    # perform a step in the environment
     env_state = env.step(env_state, action)
 
     next_observation = np.copy(env_state.obs)
