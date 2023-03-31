@@ -3,6 +3,8 @@ import pickle
 import os
 
 # things to do
+# dataset should be growing in size!
+# have option to rollout with ground truth dynamics
 # how to choose noise variance
 # smooth actions 
 # have ensemble of models
@@ -22,17 +24,18 @@ def main():
     parser.add_argument('--reload_folder_name',      default = 'saved_model')
 
     # model
-    parser.add_argument('--jax_seed',                type = int, default = 0)
+    parser.add_argument('--jax_seed',                type = int, default = 1)
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
+    # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',        default = 'reacher')
     parser.add_argument('--n_rollouts',              type = int, default = 30)
-    parser.add_argument('--time_steps',              type = int, default = 50)
+    parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
 
     # MPPI
     parser.add_argument('--horizon',                 type = int, default = 7)
-    parser.add_argument('--n_sequences',             type = int, default = 200)
+    parser.add_argument('--n_sequences',             type = int, default = 200) # 1000
     parser.add_argument('--n_elite',                 type = int, default = 20)
     parser.add_argument('--alpha',                   type = float, default = 1.0)
     parser.add_argument('--min_variance',            type = float, default = 0.001)

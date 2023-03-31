@@ -5,13 +5,14 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, print_metrics, write_metrics_to_tensorboard
-from flax.metrics import tensorboard
+from utils import keyGen, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
 from brax import envs
 from IPython.display import Image 
 from brax.io import image
+from pytinyrenderer import TinyRenderCamera as Camera
+from brax.io.image import _eye, _up
 
 def get_train_state(model, param, args):
     
@@ -28,13 +29,25 @@ def get_train_state(model, param, args):
 
     return state, lr_scheduler
 
-def create_tensorboard_writer(args):
+def get_camera(env, env_state, width, height):
 
-    # create a tensorboard writer
-    # to view tensorboard results, call 'tensorboard --logdir=.' in runs folder from terminal
-    writer = tensorboard.SummaryWriter('runs/' + args.folder_name)
+    sys = env.sys
+    qp = env_state.qp
+    ssaa = 2
+    eye, up = _eye(sys, qp), _up(sys)
+    hfov = 5.0
+    vfov = hfov * height / width
+    target = [qp.pos[0, 0], qp.pos[0, 1], 0]
+    camera = Camera(
+        viewWidth=width * ssaa,
+        viewHeight=height * ssaa,
+        position=eye,
+        target=target,
+        up=up,
+        hfov=hfov,
+        vfov=vfov)
 
-    return writer
+    return camera
 
 def render_rollout(env, controller, state, iteration, args, key):
 
@@ -50,7 +63,10 @@ def render_rollout(env, controller, state, iteration, args, key):
 
     # perform rollout
     rollout = []
-    for _ in range(args.time_steps):
+    cameras = []
+    width = 320
+    height = 240
+    for _ in range(200): # args.time_steps
 
         observation = np.copy(env_state.obs)
 
@@ -64,10 +80,11 @@ def render_rollout(env, controller, state, iteration, args, key):
 
         env_state = jit_env_step(env_state, action)
         rollout.append(env_state)
+        cameras.append(get_camera(env, env_state, width, height))
     
     # create and save a gif of the rollout
-    gif = Image(image.render(env.sys, [s.qp for s in rollout], width = 320, height = 240, fmt = 'gif'))
-    open('output_' + str(iteration) + '.gif', 'wb').write(gif.data)
+    gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
+    open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
 
 def loss_fn(params, state, inputs, target_outputs):
 
@@ -283,7 +300,7 @@ def optimise_model(model, params, args, key):
 
 
 
-        if iteration % 10 == 0:
+        if iteration % 100 == 0:
 
             # save checkpoint
             checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = iteration)
@@ -315,7 +332,7 @@ def optimise_model(model, params, args, key):
                 #     break
 
         # render a rollout and save a gif
-        # render_rollout(env, mppi, state, iteration, args, next(subkey))
+        render_rollout(env, mppi, state, iteration, args, next(subkey))
 
     optimisation_duration = time.time() - optimisation_start_time
 

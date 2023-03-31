@@ -18,16 +18,12 @@ def generate_target(key, disk_radius = 0.2):
 
     return target_position
 
-def reward_function(state, action):
+def reward_function(observation, action, next_observation):
 
-    target_position = state[4:6] # np.array([0.14, 0.14])
+    reward_dist = -np.linalg.norm(next_observation[8:])
 
-    fingertip_position = state[8:10]
+    reward_ctrl = -np.sum(action ** 2)
 
-    accuracy_reward = -np.linalg.norm(target_position - fingertip_position)
-
-    effort_cost = np.sum(action ** 2)
-
-    reward = accuracy_reward - effort_cost
+    reward = reward_dist + reward_ctrl
 
     return reward

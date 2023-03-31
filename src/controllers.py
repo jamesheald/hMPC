@@ -24,8 +24,8 @@ class MPPI:
         # predict the next observation using the learned dynamics model
         next_observation = state.apply_fn(state.params, inputs)
 
-        # calculate the reward based on the current observation and action (for some environments, the reward may be a function of the next observation also)
-        reward = reward_function(observation, action)
+        # calculate the reward based on the current observation, the action and the next observation
+        reward = reward_function(observation, action, next_observation)
 
         return next_observation, reward
 
@@ -42,7 +42,7 @@ class MPPI:
 
     def update_action_sequence(self, predict, current_observation, action_sequence_mean, key):
 
-        noise_variance = 0.1
+        noise_variance = 10
 
         # sample noise to add to the mean of the action sequence distribution
         eps = noise_variance * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))

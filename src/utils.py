@@ -1,6 +1,6 @@
-from jax import random, vmap
+from jax import jit, random, vmap
 import jax.numpy as np
-import gym
+from flax.metrics import tensorboard
 
 def keyGen(key, n_subkeys):
 	
@@ -33,6 +33,14 @@ def print_metrics(phase, duration, t_losses, v_losses = [], batch_range = [], lr
 
 		s3 = """  Validation loss {:.10f}\n"""
 		print(s3.format(v_losses.mean()))
+
+def create_tensorboard_writer(args):
+
+    # create a tensorboard writer
+    # to view tensorboard results, call 'tensorboard --logdir=.' in runs folder from terminal
+    writer = tensorboard.SummaryWriter('runs/' + args.folder_name)
+
+    return writer
 
 def write_metrics_to_tensorboard(writer, t_losses, v_losses, epoch):
 
