@@ -8,11 +8,11 @@ from flax.training.early_stopping import EarlyStopping
 from utils import keyGen, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
-from brax import envs
+from brax.v1 import envs
 from IPython.display import Image 
-from brax.io import image
+from brax.v1.io import image
 from pytinyrenderer import TinyRenderCamera as Camera
-from brax.io.image import _eye, _up
+from brax.v1.io.image import _eye, _up
 
 def get_train_state(model, param, args):
     

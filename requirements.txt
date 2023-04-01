@@ -1,5 +1,7 @@
 jax
 jaxlib
 flax
+brax
 gym
 mujoco
+tensorflow
