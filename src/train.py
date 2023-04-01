@@ -207,6 +207,7 @@ def optimise_model(model, params, args, key):
 
     mppi = MPPI(env, args)
 
+    # batch_perform_rollout = vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0))
     batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
 
     # loop over iterations
@@ -331,7 +332,7 @@ def optimise_model(model, params, args, key):
                 #     break
 
         # render a rollout and save a gif
-        render_rollout(env, mppi, state, iteration, args, next(subkey))
+        # render_rollout(env, mppi, state, iteration, args, next(subkey))
 
     optimisation_duration = time.time() - optimisation_start_time
 

@@ -8,13 +8,11 @@ class MPPI:
 
     def __init__(self, env, args):
 
-        self.n_sequences = args.n_sequences
-        self.n_actions = env.action_size
         self.horizon = args.horizon
-        # self.n_elite = args.n_elite
-        # self.alpha = args.alpha
-        # self.min_variance = args.min_variance
+        self.n_actions = env.action_size
+        self.n_sequences = args.n_sequences
         self.reward_weighting_factor = args.reward_weighting_factor
+        self.noise_variance = args.noise_variance
 
     def ground_truth_dynamics_one_step_prediction(self, env, state, carry, action):
 
@@ -60,25 +58,23 @@ class MPPI:
 
     def update_action_sequence(self, predict, env_state, action_sequence_mean, key):
 
-        noise_variance = 1
+        # sample noise
+        eps = random.normal(key, (self.horizon, self.n_actions, self.n_sequences)) * self.noise_variance
 
-        # sample noise to add to the mean of the action sequence distribution
-        eps = noise_variance * random.normal(key, (self.horizon, self.n_actions, self.n_sequences))
-
-        # add noise to the mean of the action sequence distribution
+        # add the sampled noise to the mean of the action sequence distribution
         action_sequences = np.expand_dims(action_sequence_mean, 2) + eps
 
-        # clip actions
+        # clip the actions
         action_sequences = np.clip(action_sequences, -1.0, 1.0)
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
         total_reward = self.batch_estimate_return(predict, env_state, action_sequences)
 
-        # assign a weight to each action sequence based on its total reward
-        weights = np.expand_dims(nn.activation.softmax(total_reward * self.reward_weighting_factor), (0, 1))
+        # assign a weight to each action sequence based on its cumulative reward
+        weights = nn.activation.softmax(total_reward * self.reward_weighting_factor)
 
         # update the mean of the action sequence distribution
-        action_sequence_mean = np.sum(action_sequences * weights, 2)
+        action_sequence_mean = np.sum(action_sequences * np.expand_dims(weights, (0, 1)), 2)
 
         return action_sequence_mean
 
@@ -104,6 +100,8 @@ class MPPI:
         # the mean of the optimised action sequence distribution (at the current time step) is the action to take in the environment
         action = action_sequence_mean[0, :]
 
+        # warmstarting (reuse the plan from the previous planning step)
+        # amortise the optimisation process across multiple planning steps
         # shift the mean of the action sequence distribution by one time point
         # this implicitly copies/repeats the last time point (alternatively it could be set to 0)
         action_sequence_mean = action_sequence_mean.at[:-1, :].set(action_sequence_mean[1:, :])

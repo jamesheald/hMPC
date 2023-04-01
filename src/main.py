@@ -30,16 +30,14 @@ def main():
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',        default = 'reacher')
-    parser.add_argument('--n_rollouts',              type = int, default = 30)
+    parser.add_argument('--n_rollouts',              type = int, default = 30) # 30
     parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
 
     # MPPI
-    parser.add_argument('--horizon',                 type = int, default = 7)
-    parser.add_argument('--n_sequences',             type = int, default = 200) # 1000
-    parser.add_argument('--n_elite',                 type = int, default = 20)
-    parser.add_argument('--alpha',                   type = float, default = 1.0)
-    parser.add_argument('--min_variance',            type = float, default = 0.001)
+    parser.add_argument('--horizon',                 type = int, default = 100) # 7
+    parser.add_argument('--n_sequences',             type = int, default = 1000) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
+    parser.add_argument('--noise_variance',          type = float, default = 0.1)
     # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
 
     # optimisation
@@ -54,7 +52,7 @@ def main():
     parser.add_argument('--print_every',             type = int, default = 50)
     parser.add_argument('--n_epochs',                type = int, default = 40)
     parser.add_argument('--n_model_iterations',      type = int, default = 500)
-    parser.add_argument('--batch_size',              type = int, default = 30)
+    parser.add_argument('--batch_size',              type = int, default = 25) # 30
     parser.add_argument('--min_delta',               type = float, default = 1e-3)
     parser.add_argument('--patience',                type = int, default = 2)
 
@@ -92,8 +90,19 @@ def main():
 
     # import jax
     # jax.profiler.start_trace('runs/' + folder_name)
-    optimise_model(model, params, args, key)
+    # optimise_model(model, params, args, key)
     # jax.profiler.stop_trace()
+
+    from train import render_rollout
+    from brax.v1 import envs
+    from jax import random
+    from controllers import MPPI
+    env = envs.create(env_name = args.environment_name)
+    controller = MPPI(env, args)
+    state = []
+    iteration = 1
+    key = random.PRNGKey(0)
+    render_rollout(env, controller, state, iteration, args, key)
 
     # from utils import forward_pass_model
     # from jax import numpy as np
