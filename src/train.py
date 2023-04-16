@@ -9,10 +9,10 @@ from utils import keyGen, print_metrics, create_tensorboard_writer, write_metric
 import time
 from copy import copy
 from brax.v1 import envs
-from IPython.display import Image 
 from brax.v1.io import image
-from pytinyrenderer import TinyRenderCamera as Camera
 from brax.v1.io.image import _eye, _up
+from IPython.display import Image 
+from pytinyrenderer import TinyRenderCamera as Camera
 
 def get_train_state(model, param, args):
     
@@ -39,20 +39,21 @@ def get_camera(env, env_state, width, height):
     vfov = hfov * height / width
     target = [qp.pos[0, 0], qp.pos[0, 1], 0]
     camera = Camera(
-        viewWidth=width * ssaa,
-        viewHeight=height * ssaa,
-        position=eye,
-        target=target,
-        up=up,
-        hfov=hfov,
-        vfov=vfov)
+        viewWidth = width * ssaa,
+        viewHeight = height * ssaa,
+        position = eye,
+        target = target,
+        up = up,
+        hfov = hfov,
+        vfov = vfov)
 
     return camera
 
 def render_rollout(env, controller, state, iteration, args, key):
 
-    # jit compile env.step
+    # jit environment and mpc policy
     jit_env_step = jit(env.step)
+    jit_mpc_action = jit(partial(mpc_action, controller, env))
 
     key, subkeys = keyGen(key, n_subkeys = args.time_steps + 1)
 
@@ -66,7 +67,7 @@ def render_rollout(env, controller, state, iteration, args, key):
     cameras = []
     width = 320
     height = 240
-    for _ in range(args.time_steps):
+    for time in range(args.time_steps):
 
         observation = np.copy(env_state.obs)
 
@@ -76,7 +77,7 @@ def render_rollout(env, controller, state, iteration, args, key):
 
         else:
 
-            action, action_sequence_mean = mpc_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
+            action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
 
         env_state = jit_env_step(env_state, action)
         rollout.append(env_state)
@@ -184,10 +185,6 @@ def reshape_dataset(dataset, args):
 
     return dataset
 
-# def calculate_fingertip_position():
-
-#     return 
-
 def optimise_model(model, params, args, key):
 
     # start optimisation timer
@@ -207,7 +204,6 @@ def optimise_model(model, params, args, key):
 
     mppi = MPPI(env, args)
 
-    # batch_perform_rollout = vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0))
     batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
 
     # loop over iterations

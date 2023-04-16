@@ -3,11 +3,13 @@ import pickle
 import os
 
 # things to do
-# dataset should be growing in size!
+# maybe train dynamics model to predict change in state not next state
+# dataset should be growing in size! - but sample minibatches so not training on all data! (as in Learning Latent Dynamics for Planning from Pixels or BLENDING MPC & VALUE FUNCTION APPROXIMATION FOR EFFICIENT REINFORCEMENT LEARNING)
 # use scan and jit for rollout render
-# how to choose noise variance
-# smooth actions 
+# how to choose noise variance?
+# smooth actions?
 # have ensemble of models
+# parralelise action sequence rollouts in MPC using pmap
 
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
@@ -34,7 +36,7 @@ def main():
     parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
 
     # MPPI
-    parser.add_argument('--horizon',                 type = int, default = 100) # 7
+    parser.add_argument('--horizon',                 type = int, default = 7) # 7
     parser.add_argument('--n_sequences',             type = int, default = 1000) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
     parser.add_argument('--noise_variance',          type = float, default = 0.1)
@@ -98,11 +100,11 @@ def main():
     from jax import random
     from controllers import MPPI
     env = envs.create(env_name = args.environment_name)
-    controller = MPPI(env, args)
+    mppi = MPPI(env, args)
     state = []
     iteration = 1
     key = random.PRNGKey(0)
-    render_rollout(env, controller, state, iteration, args, key)
+    render_rollout(env, mppi, state, iteration, args, key)
 
     # from utils import forward_pass_model
     # from jax import numpy as np
