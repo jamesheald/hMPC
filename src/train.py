@@ -69,8 +69,6 @@ def render_rollout(env, controller, state, iteration, args, key):
     height = 240
     for time in range(args.time_steps):
 
-        observation = np.copy(env_state.obs)
-
         if iteration == 0:
 
             action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))

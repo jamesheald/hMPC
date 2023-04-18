@@ -36,10 +36,10 @@ def main():
     parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
 
     # MPPI
-    parser.add_argument('--horizon',                 type = int, default = 7) # 7
+    parser.add_argument('--horizon',                 type = int, default = 50) # 7
     parser.add_argument('--n_sequences',             type = int, default = 1000) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
-    parser.add_argument('--noise_variance',          type = float, default = 0.1)
+    parser.add_argument('--noise_std',               type = float, default = 0.1)
     # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
 
     # optimisation
@@ -103,7 +103,7 @@ def main():
     mppi = MPPI(env, args)
     state = []
     iteration = 1
-    key = random.PRNGKey(0)
+    key = random.PRNGKey(args.jax_seed)
     render_rollout(env, mppi, state, iteration, args, key)
 
     # from utils import forward_pass_model

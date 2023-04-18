@@ -12,7 +12,7 @@ class MPPI:
         self.n_actions = env.action_size
         self.n_sequences = args.n_sequences
         self.reward_weighting_factor = args.reward_weighting_factor
-        self.noise_variance = args.noise_variance
+        self.noise_std = args.noise_std
 
     def ground_truth_dynamics_one_step_prediction(self, env, state, carry, action):
 
@@ -20,9 +20,10 @@ class MPPI:
 
         env_state = env.step(env_state, action)
         
-        reward = env_state.reward
+        # reward = env_state.reward
+        reward = reward_function([], action, env_state.obs)
 
-        observation, env_state = carry
+        carry = observation, env_state
 
         return carry, reward
 
@@ -45,7 +46,7 @@ class MPPI:
 
     def estimate_return(self, predict, env_state, action_sequence):
 
-        carry = np.copy(env_state.obs), env_state
+        carry = env_state.obs, env_state
 
         # use the learned model to predict the observation sequence and reward associated with each action sequence
         _, reward = lax.scan(predict, carry, action_sequence)
@@ -58,14 +59,24 @@ class MPPI:
 
     def update_action_sequence(self, predict, env_state, action_sequence_mean, key):
 
-        # sample noise
-        eps = random.normal(key, (self.horizon, self.n_actions, self.n_sequences)) * self.noise_variance
+        # # sample noise from a normal distribution
+        # eps = random.normal(key, (self.horizon, self.n_actions, self.n_sequences)) * self.noise_std
 
-        # add the sampled noise to the mean of the action sequence distribution
-        action_sequences = np.expand_dims(action_sequence_mean, 2) + eps
+        # # add the sampled noise to the mean of the action sequence distribution
+        # action_sequences = action_sequence_mean[:, :, None] + eps
 
-        # clip the actions
-        action_sequences = np.clip(action_sequences, -1.0, 1.0)
+        # # clip the actions
+        # action_sequences = np.clip(action_sequences, -1.0, 1.0)
+
+        # use the same mean for each sequence
+        action_sequence_mean = np.repeat(action_sequence_mean[:, :, None], self.n_sequences, axis = 2)
+
+        # sample noise from a truncated normal distribution
+        lower = (-1 - action_sequence_mean) / self.noise_std
+        upper = (1 - action_sequence_mean) / self.noise_std
+        eps = random.truncated_normal(key, lower = lower, upper = upper, shape = (self.horizon, self.n_actions, self.n_sequences)) * self.noise_std
+
+        action_sequences = action_sequence_mean + eps
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
         total_reward = self.batch_estimate_return(predict, env_state, action_sequences)
@@ -74,7 +85,7 @@ class MPPI:
         weights = nn.activation.softmax(total_reward * self.reward_weighting_factor)
 
         # update the mean of the action sequence distribution
-        action_sequence_mean = np.sum(action_sequences * np.expand_dims(weights, (0, 1)), 2)
+        action_sequence_mean = np.sum(action_sequences * weights[None, None, :], 2)
 
         return action_sequence_mean
 
@@ -98,7 +109,7 @@ class MPPI:
         action_sequence_mean = self.update_action_sequence(predict, env_state, action_sequence_mean, key)
 
         # the mean of the optimised action sequence distribution (at the current time step) is the action to take in the environment
-        action = action_sequence_mean[0, :]
+        action = np.copy(action_sequence_mean[0, :])
 
         # warmstarting (reuse the plan from the previous planning step)
         # amortise the optimisation process across multiple planning steps
