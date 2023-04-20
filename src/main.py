@@ -2,6 +2,11 @@ import argparse
 import pickle
 import os
 
+# things that matter:
+# weights on error and controls
+# softmax temperature
+# action noise magnitude
+
 # things to do
 # maybe train dynamics model to predict change in state not next state
 # dataset should be growing in size! - but sample minibatches so not training on all data! (as in Learning Latent Dynamics for Planning from Pixels or BLENDING MPC & VALUE FUNCTION APPROXIMATION FOR EFFICIENT REINFORCEMENT LEARNING)
@@ -26,7 +31,7 @@ def main():
     parser.add_argument('--reload_folder_name',      default = 'saved_model')
 
     # model
-    parser.add_argument('--jax_seed',                type = int, default = 1)
+    parser.add_argument('--jax_seed',                type = int, default = 0)
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
@@ -37,7 +42,7 @@ def main():
 
     # MPPI
     parser.add_argument('--horizon',                 type = int, default = 50) # 7
-    parser.add_argument('--n_sequences',             type = int, default = 1000) # 200
+    parser.add_argument('--n_sequences',             type = int, default = 200) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
     parser.add_argument('--noise_std',               type = float, default = 0.1)
     # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
@@ -105,15 +110,6 @@ def main():
     iteration = 1
     key = random.PRNGKey(args.jax_seed)
     render_rollout(env, mppi, state, iteration, args, key)
-
-    # from utils import forward_pass_model
-    # from jax import numpy as np
-    # import tensorflow_datasets as tfds
-    # train_dataset = np.array(list(tfds.as_numpy(train_dataset))[0]['image']).reshape(args.batch_size, 105, 105, 1)
-    # output = forward_pass_model(models[0], params[0], train_dataset, state_myo, args, key)
-    # from matplotlib import pyplot as plt
-    # plt.imshow(output['output_images'])
-    # plt.show()
 
 if __name__ == '__main__':
 

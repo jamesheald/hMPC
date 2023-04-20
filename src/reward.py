@@ -21,11 +21,9 @@ def generate_target(key, disk_radius = 0.2):
 def reward_function(observation, action, next_observation):
 
     reward_dist = -np.linalg.norm(next_observation[8:])
-    reward_dist = -np.sum((next_observation[8:] * 1000) ** 2)
 
     reward_ctrl = -np.sum(action ** 2)
 
-    reward = reward_dist + reward_ctrl
-    reward = 1000 * reward_dist + 1000 * reward_ctrl
+    reward = 10 * reward_dist + 1 * reward_ctrl
 
     return reward

@@ -54,27 +54,3 @@ def write_metrics_to_tensorboard(writer, t_losses, v_losses, epoch):
 	writer.scalar('KL (validation)', v_losses['kl'].mean(), epoch)
 	writer.scalar('KL prescale (validation)', v_losses['kl_prescale'].mean(), epoch)
 	writer.flush()
-
-def forward_pass_model(model_vae, params_vae, data, state_myo, args, key):
-
-	def apply_model(model_vae, params_vae, data, A, gamma, state_myo, key):
-
-		return model_vae.apply({'params': {'encoder': params_vae['params']['encoder']}}, data, params_vae['decoder'], A, gamma, state_myo, key)
-
-	batch_apply_model = vmap(apply_model, in_axes = (None, None, 0, None, None, None, 0))
-
-	# construct the dynamics of each loop from the parameters
-	A, gamma = construct_dynamics_matrix(params_vae['decoder'])
-
-	# create a subkey for each example in the batch
-	batch_size = data.shape[0]
-	subkeys = random.split(key, batch_size)
-
-	# apply the model
-	output = batch_apply_model(model_vae, params_vae, data, A, gamma, state_myo, subkeys)
-
-	# store the original and reconstructed images in the model output
-	output['input_images'] = original_images(data, args)
-	output['output_images'] = reconstructed_images(output['pen_xy'], output['pen_down_log_p'], args)
-
-	return output
