@@ -67,6 +67,7 @@ def render_rollout(env, controller, state, iteration, args, key):
     cameras = []
     width = 320
     height = 240
+    actions = np.empty((env.action_size, args.time_steps))
     for time in range(args.time_steps):
 
         if iteration == 0:
@@ -77,13 +78,18 @@ def render_rollout(env, controller, state, iteration, args, key):
 
             action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
 
+        actions = actions.at[:, time].set(action)
         env_state = jit_env_step(env_state, action)
         rollout.append(env_state)
         cameras.append(get_camera(env, env_state, width, height))
-    
+
+    # (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
+
     # create and save a gif of the rollout
-    gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
-    open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
+    # gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
+    # open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
+
+    return actions
 
 def loss_fn(params, state, inputs, target_outputs):
 

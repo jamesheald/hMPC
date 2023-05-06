@@ -8,9 +8,12 @@ import os
 # action noise magnitude
 
 # things to do
+# have a condition flag for using true vs learned dynamics
+# incorporate continuation/termination flag into learned dynamics?
+# only clip when passing to dynamics function, not when performing MPPI (think about whether clipped/unclipped should be passed to dyanmics fucntions and VAE)
 # maybe train dynamics model to predict change in state not next state
 # dataset should be growing in size! - but sample minibatches so not training on all data! (as in Learning Latent Dynamics for Planning from Pixels or BLENDING MPC & VALUE FUNCTION APPROXIMATION FOR EFFICIENT REINFORCEMENT LEARNING)
-# use scan and jit for rollout render
+# use scan for rollout render
 # how to choose noise variance?
 # smooth actions?
 # have ensemble of models
@@ -104,12 +107,22 @@ def main():
     from brax.v1 import envs
     from jax import random
     from controllers import MPPI
+    import numpy as np
     env = envs.create(env_name = args.environment_name)
     mppi = MPPI(env, args)
     state = []
     iteration = 1
-    key = random.PRNGKey(args.jax_seed)
-    render_rollout(env, mppi, state, iteration, args, key)
+    n_targets = 10
+    actions = np.empty((env.action_size, args.time_steps, n_targets))
+    for target in range(n_targets):
+        key = random.PRNGKey(args.jax_seed + target)
+        actions[:, :, target] = render_rollout(env, mppi, state, iteration, args, key)
+
+    from matplotlib import pyplot as plt
+    for target in range(n_targets):
+        plt.plot(actions[0, :, target], actions[1, :, target], '.')
+    plt.show()
+    breakpoint()
 
 if __name__ == '__main__':
 

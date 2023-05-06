@@ -44,6 +44,23 @@ class MPPI:
 
         return carry, reward
 
+    def learned_dynamics_one_step_prediction_GRU(self, env, state, carry, action):
+
+        observation, env_state = carry
+
+        # concatenate the current observation and action to form the input to the dynamics model
+        inputs = np.concatenate((observation, action))
+
+        # predict the next observation using the learned dynamics model
+        next_observation = state.apply_fn(state.params, inputs)
+
+        # calculate the reward based on the current observation, the action and the next observation
+        reward = reward_function(observation, action, next_observation)
+
+        next_observation, env_state = carry
+
+        return carry, reward
+
     def estimate_return(self, predict, env_state, action_sequence):
 
         carry = env_state.obs, env_state
@@ -102,8 +119,9 @@ class MPPI:
 
         #     break
 
-        predict = partial(self.ground_truth_dynamics_one_step_prediction, env, state)
+        # predict = partial(self.ground_truth_dynamics_one_step_prediction, env, state)
         # predict = partial(self.learned_dynamics_one_step_prediction, env, state)
+        predict = partial(self.learned_dynamics_one_step_prediction_GRU, env, state)
 
         # update the mean of the action sequence distribution
         action_sequence_mean = self.update_action_sequence(predict, env_state, action_sequence_mean, key)

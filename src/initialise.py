@@ -4,7 +4,7 @@ import jax.numpy as np
 from utils import keyGen
 from brax import envs
 
-class dynamics_model(nn.Module):
+class dynamics_model_MLP(nn.Module):
     output_dim: int
 
     @nn.compact
@@ -22,6 +22,63 @@ class dynamics_model(nn.Module):
         # return {'x_mean': x_mean, 'x_log_var': x_log_var}
         
         return x
+
+class state_encoding_GRU(nn.Module):
+    hidden_dim: int
+
+    @nn.compact
+    def __call__(self, x):
+        
+        x = nn.Dense(features = self.hidden_dim)(x)
+
+        return x
+
+class dynamics_model_GRU(nn.Module):
+    hidden_dim: int
+    output_dim: int
+
+    @nn.compact
+    def __call__(self, carry, inputs):
+        
+        carry, outputs = nn.GRUCell(kernel_init = initializers.lecun_normal())(carry, inputs)
+        
+        # mean and log variances of Gaussian distribution over next state
+        params = nn.Dense(features = self.output_dim * 2)(outputs)
+        x_mean, x_log_var = np.split(params, 2, axis = 1)
+
+        return carry, {'x_mean': x_mean, 'x_log_var': x_log_var}
+
+class VAE(nn.Module):
+    n_loops_top_layer: int
+    x_dim: list
+    image_dim: list
+    T: int
+    dt: float
+    tau: float
+
+    def setup(self):
+        
+        self.state_encoding_GRU = state_encoding_GRU(self.hidden_dim)
+        self.sampler = dynamics_model_GRU(self.hidden_dim, self.output_dim)
+
+    def __call__(self, data, params, A, gamma, state_myo, key):
+
+        output_encoder = self.encoder(data[None,:,:,None])
+        z1, z2 = self.sampler(output_encoder, params, key)
+        output_decoder = self.decoder(params, A, gamma, z1, z2, state_myo)
+        
+        return output_encoder | output_decoder
+
+def estimate_return(self, predict, env_state, action_sequence):
+
+    carry = env_state.obs, env_state
+
+    # use the learned model to predict the observation sequence and reward associated with each action sequence
+    _, reward = lax.scan(predict, carry, action_sequence)
+
+    total_reward = reward.sum()
+
+    return total_reward
 
 def initialise_model(args):
 
