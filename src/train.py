@@ -275,7 +275,7 @@ def optimise_model(model, params, args, key):
             state, loss = train_step_jit(state, all_actions, all_observations, args.n_batches, args.chunk_length, next(subkey))
 
             # compute the average training loss
-            training_loss = training_loss * update / (update + 1) + loss / (update + 1)
+            training_loss = (training_loss * update + loss) / (update + 1)
 
             if update == 0 or update == args.n_updates - 1:
 
