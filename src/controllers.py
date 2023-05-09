@@ -27,39 +27,22 @@ class MPPI:
 
         return carry, reward
 
-    def learned_dynamics_one_step_prediction(self, env, state, carry, action):
+    # def learned_dynamics_one_step_prediction(self, env, state, carry, action):
 
-        observation, env_state = carry
+    #     observation, env_state = carry
 
-        # concatenate the current observation and action to form the input to the dynamics model
-        inputs = np.concatenate((observation, action))
+    #     # concatenate the current observation and action to form the input to the dynamics model
+    #     inputs = np.concatenate((observation, action))
 
-        # predict the next observation using the learned dynamics model
-        next_observation = state.apply_fn(state.params, inputs)
+    #     # predict the next observation using the learned dynamics model
+    #     next_observation = state.apply_fn(state.params, inputs)
 
-        # calculate the reward based on the current observation, the action and the next observation
-        reward = reward_function(observation, action, next_observation)
+    #     # calculate the reward based on the current observation, the action and the next observation
+    #     reward = reward_function(observation, action, next_observation)
 
-        next_observation, env_state = carry
+    #     next_observation, env_state = carry
 
-        return carry, reward
-
-    def learned_dynamics_one_step_prediction_GRU(self, env, state, carry, action):
-
-        observation, env_state = carry
-
-        # concatenate the current observation and action to form the input to the dynamics model
-        inputs = np.concatenate((observation, action))
-
-        # predict the next observation using the learned dynamics model
-        next_observation = state.apply_fn(state.params, inputs)
-
-        # calculate the reward based on the current observation, the action and the next observation
-        reward = reward_function(observation, action, next_observation)
-
-        next_observation, env_state = carry
-
-        return carry, reward
+    #     return carry, reward
 
     def estimate_return(self, predict, env_state, action_sequence):
 
@@ -74,7 +57,16 @@ class MPPI:
 
     batch_estimate_return = vmap(estimate_return, in_axes = (None, None, None, 2))
 
-    def update_action_sequence(self, predict, env_state, action_sequence_mean, key):
+    def estimate_cumulative_reward(self, state, observation, action_sequence):
+
+        _, _, cumulative_reward = state.apply_fn(state.params, observation, action_sequence)
+
+        return cumulative_reward
+
+    batch_estimate_cumulative_reward = vmap(estimate_cumulative_reward, in_axes = (None, None, None, 2))
+
+    # def update_action_sequence(self, predict, env_state, action_sequence_mean, key):
+    def update_action_sequence(self, state, predict, env_state, action_sequence_mean, key):
 
         # # sample noise from a normal distribution
         # eps = random.normal(key, (self.horizon, self.n_actions, self.n_sequences)) * self.noise_std
@@ -96,7 +88,8 @@ class MPPI:
         action_sequences = action_sequence_mean + eps
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
-        total_reward = self.batch_estimate_return(predict, env_state, action_sequences)
+        # total_reward = self.batch_estimate_cumulative_reward(state, env_state.obs, action_sequences) # use this for learned GRU dynamics
+        total_reward = self.batch_estimate_return(predict, env_state, action_sequences) # use this for ground truth
 
         # assign a weight to each action sequence based on its cumulative reward
         weights = nn.activation.softmax(total_reward * self.reward_weighting_factor)
@@ -124,7 +117,7 @@ class MPPI:
         # predict = partial(self.learned_dynamics_one_step_prediction_GRU, env, state)
 
         # update the mean of the action sequence distribution
-        action_sequence_mean = self.update_action_sequence(predict, env_state, action_sequence_mean, key)
+        action_sequence_mean = self.update_action_sequence(state, predict, env_state, action_sequence_mean, key)
 
         # the mean of the optimised action sequence distribution (at the current time step) is the action to take in the environment
         action = np.copy(action_sequence_mean[0, :])

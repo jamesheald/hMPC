@@ -3,7 +3,7 @@ from flax import linen as nn
 import jax.numpy as np
 from utils import keyGen
 from brax import envs
-from reward import expected_reward
+from reward import batch_expected_reward
 
 # class dynamics_model_MLP(nn.Module):
 #     output_dim: int
@@ -69,8 +69,8 @@ class rollout_prediction(nn.Module):
         _, (mu, log_var) = lax.scan(lambda carry, action: self.dynamics.apply(self.dynamics_params, carry, action), carry, action_sequence)
 
         # calculate the expected cumulative reward under the predicted distribution of future observations
-        # n.b. future observations are defined relative to the current observation
-        cumulative_reward = vmap(expected_reward, in_axes = (0, 0, 0))(action_sequence, mu + observation, log_var).sum()
+        # future observations are defined relative to the current observation
+        cumulative_reward = batch_expected_reward(action_sequence, mu + observation, log_var).sum()
         
         return mu, log_var, cumulative_reward
 

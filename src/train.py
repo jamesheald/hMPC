@@ -98,21 +98,27 @@ def log_likelihood_diagonal_Gaussian(x, mu, log_var):
     """
     log_var = stabilise_variance(log_var)
     
-    return np.sum(-0.5*(log_var + np.log(2*np.pi) + (x - mu)**2/np.exp(log_var)), axis = (1, 2))
+    return np.sum(-0.5*(log_var + np.log(2*np.pi) + (x - mu)**2/np.exp(log_var)))
 
 def loss_fn(params, state, actions, observations):
 
-    batch_rollout_prediction = vmap(state.apply_fn, in_axes = (None, 0, 0))
-
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    mu, log_var, _ = batch_rollout_prediction(params, observations[:, 0, :], actions)
+    mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
 
-    # negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(observations[:, 1:, :], mu + observations[:, 0, None, :], log_var).mean()
+    # calculate the negative log probability of the sequence of observations
+    loss = -log_likelihood_diagonal_Gaussian(observations[1:, :], mu + observations[0, None, :], log_var)
 
     return loss
 
-loss_grad = value_and_grad(loss_fn)
+batch_loss_fn = vmap(loss_fn, in_axes = (None, None, 0, 0))
+
+def loss(params, state, actions, observations):
+
+    batch_loss = batch_loss_fn(params, state, actions, observations).mean()
+
+    return batch_loss
+
+loss_grad = value_and_grad(loss)
 
 def sample_sequence_chunk(actions, observations, chunk_length, key):
 
@@ -135,7 +141,6 @@ def train_step(state, actions, observations, key, n_batches, chunk_length):
 
     subkeys = random.split(key, n_batches)
 
-    # sampled_actions, sampled_observations = sample_sequence_chunk(actions, observations, chunk_length, key)
     sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, subkeys)
     
     loss, grads = loss_grad(state.params, state, sampled_actions, sampled_observations)
@@ -198,8 +203,6 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
     return outputs
 
 def collect_data(env, is_random_policy, batch_perform_rollout, state, key, args):
-
-    print('play with using pmap for running rollout in parallel?')
 
     subkeys = random.split(key, args.n_rollouts)
     actions, observations, cumulative_rewards = batch_perform_rollout(is_random_policy, state, env, subkeys)
