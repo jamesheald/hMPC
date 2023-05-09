@@ -45,9 +45,7 @@ class dynamics_model(nn.Module):
         carry, outputs = nn.GRUCell(kernel_init = nn.initializers.lecun_normal())(carry, action)
         
         # mean and log variances of Gaussian distribution over next state
-        params = nn.Dense(features = self.observation_dim * 2)(outputs)
-
-        mu, log_var = np.split(params, 2)
+        mu, log_var = np.split(nn.Dense(features = self.observation_dim * 2)(outputs), 2)
 
         return carry, (mu, log_var)
 

@@ -114,24 +114,36 @@ def loss_fn(params, state, actions, observations):
 
 loss_grad = value_and_grad(loss_fn)
 
-def train_step(state, actions, observations):
+def sample_sequence_chunk(actions, observations, chunk_length, key):
+
+    key, subkeys = keyGen(key, n_subkeys = 2)
+
+    # sample an episode
+    e = jax.random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[0])
+
+    # sample a time step
+    t = jax.random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[1] - chunk_length)
+
+    sampled_actions = actions[e,t:t + chunk_length,:]
+    sampled_observations = observations[e,t:t + chunk_length + 1,:]
+
+    return sampled_actions, sampled_observations
+
+batch_sample_sequence_chunk = vmap(sample_sequence_chunk, in_axes = (None, None, None, 0))
+
+def train_step(state, actions, observations, n_batches, chunk_length, key):
+
+    subkeys = random.split(key, n_batches)
+
+    sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, subkeys):
     
-    loss, grads = loss_grad(state.params, state, actions, observations)
+    loss, grads = loss_grad(state.params, state, sampled_actions, sampled_observations)
 
     state = state.apply_gradients(grads = grads)
     
     return state, loss
 
 train_step_jit = jit(train_step)
-
-def sample_sequence_chunk(actions, observations, key):
-
-    jax.random.choice(key, np.random.randn(30,15,2))
-    jax.random.randint(key, shape = (1,), minval = 1, maxval = 100)
-
-    actions = 
-
-    return 
 
 def random_action(controller, env, env_state, state, action_sequence_mean, key):
 
@@ -226,7 +238,7 @@ def optimise_model(model, params, args, key):
         ###########################################
 
         # collect dataset
-        key, subkey = keyGen(key, n_subkeys = 2)
+        key, subkey = keyGen(key, n_subkeys = args.n_updates + 1)
 
         if iteration == 0:
 
@@ -254,72 +266,25 @@ def optimise_model(model, params, args, key):
         ########## train dynamics model ###########
         ###########################################
 
+        # initialise the losses and the timer
+        training_loss = 0
+        train_start_time = time.time()
         for update in range(args.n_updates):
-            
-            # start epoch timer
-            epoch_start_time = time.time()
 
-            # generate subkeys
-            # key, training_subkeys = keyGen(key, n_subkeys = args.n_batches)
+            # perform a parameter update
+            state, loss = train_step_jit(state, all_actions, all_observations, args.n_batches, args.chunk_length, next(subkey))
 
-            # initialise the losses and the timer
-            training_loss = 0
-            batch_start_time = time.time()
+            # compute the average training loss
+            training_loss = training_loss * update / (update + 1) + loss / (update + 1)
 
-            # loop over batches
-            for batch in range(1, actions.shape[0] + 1):
+            if update == 0 or update == args.n_updates - 1:
 
-                # train the  dynamics model
-                state, loss = train_step_jit(state, actions[batch,:,:,:], observations[batch,:,:,:])
-
-                # average training loss
-                training_loss = training_loss + loss / (actions.shape[0] + 1)
-
-            if epoch == 0 or epoch == args.n_epochs - 1:
-
-                # end batches timer
-                epoch_duration = time.time() - epoch_start_time
+                # calculate duration
+                train_duration = time.time() - train_start_time
 
                 # print metrics
-                print_metrics("batch", epoch_duration, training_loss, batch_range = [batch - args.print_every + 1, batch], 
+                print_metrics("batch", train_duration, training_loss, batch_range = [update - args.print_every + 1, update], 
                               lr = lr_scheduler(state.step - 1))
-
-
-
-
-
-
-        # loop over epochs
-        for epoch in range(args.n_epochs):
-            
-            # start epoch timer
-            epoch_start_time = time.time()
-
-            # generate subkeys
-            # key, training_subkeys = keyGen(key, n_subkeys = args.n_batches)
-
-            # initialise the losses and the timer
-            training_loss = 0
-            batch_start_time = time.time()
-
-            # loop over batches
-            for batch in range(1, actions.shape[0] + 1):
-
-                # train the  dynamics model
-                state, loss = train_step_jit(state, actions[batch,:,:,:], observations[batch,:,:,:])
-
-                # average training loss
-                training_loss = training_loss + loss / (actions.shape[0] + 1)
-
-            if epoch == 0 or epoch == args.n_epochs - 1:
-
-                # end batches timer
-                epoch_duration = time.time() - epoch_start_time
-
-                # print metrics
-                print_metrics("batch", epoch_duration, training_loss, batch_range = [batch - args.print_every + 1, batch], 
-                              lr = lr_scheduler(state.step - 1))
-
 
                 # # training losses (average of 'print_every' batches)
                 # training_loss = training_loss + mse / args.print_every
@@ -346,8 +311,6 @@ def optimise_model(model, params, args, key):
                 #     # re-initialise the losses and timer
                 #     training_loss = 0
                 #     batch_start_time = time.time()
-
-
 
         if iteration % 100 == 0:
 
