@@ -5,7 +5,7 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
+from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
 from brax.v1 import envs
@@ -86,34 +86,52 @@ def render_rollout(env, controller, state, iteration, args, key):
     # (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
 
     # create and save a gif of the rollout
-    # gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
-    # open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
+    gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
+    open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
 
     return actions
 
-def loss_fn(params, state, inputs, target_outputs):
+def log_likelihood_diagonal_Gaussian(x, mu, log_var):
+    """
+    Calculate the log likelihood of x under a diagonal Gaussian distribution
+    var_min is added to the variances for numerical stability
+    """
+    log_var = stabilise_variance(log_var)
+    
+    return np.sum(-0.5*(log_var + np.log(2*np.pi) + (x - mu)**2/np.exp(log_var)), axis = (1, 2))
 
-    batch_dynamics_model = vmap(state.apply_fn, in_axes = (None, 0))
+def loss_fn(params, state, actions, observations):
 
-    # predict the next observation using the learned myosuite dynamics model
-    predicted_outputs = batch_dynamics_model(params, inputs)
+    batch_rollout_prediction = vmap(state.apply_fn, in_axes = (None, 0, 0))
 
-    # mean squared error between the predicted and actual (i.e. myosuite) fingertip position
-    loss = ((target_outputs - predicted_outputs) ** 2).mean()
+    # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
+    mu, log_var, _ = batch_rollout_prediction(params, observations[:, 0, :], actions)
+
+    # log probability of the sequence of observations
+    loss = log_likelihood_diagonal_Gaussian(observations[:, 1:, :], mu + observations[:, 0, None, :], log_var).mean()
 
     return loss
 
 loss_grad = value_and_grad(loss_fn)
 
-def train_step(state, inputs, outputs):
+def train_step(state, actions, observations):
     
-    loss, grads = loss_grad(state.params, state, inputs, outputs)
+    loss, grads = loss_grad(state.params, state, actions, observations)
 
     state = state.apply_gradients(grads = grads)
     
     return state, loss
 
 train_step_jit = jit(train_step)
+
+def sample_sequence_chunk(actions, observations, key):
+
+    jax.random.choice(key, np.random.randn(30,15,2))
+    jax.random.randint(key, shape = (1,), minval = 1, maxval = 100)
+
+    actions = 
+
+    return 
 
 def random_action(controller, env, env_state, state, action_sequence_mean, key):
 
@@ -164,7 +182,7 @@ def perform_rollout(is_random_policy, state, env, key, controller, time_steps, h
 
     (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
 
-    outputs = np.concatenate((observation, action), axis = 1), next_observation, cumulative_reward
+    outputs = action, np.vstack((observation[0,:], next_observation)), cumulative_reward
 
     return outputs
 
@@ -173,21 +191,11 @@ def collect_data(env, is_random_policy, batch_perform_rollout, state, key, args)
     print('play with using pmap for running rollout in parallel?')
 
     subkeys = random.split(key, args.n_rollouts)
-    inputs_dynamics, outputs_dynamics, cumulative_rewards = batch_perform_rollout(is_random_policy, state, env, subkeys)
-
+    actions, observations, cumulative_rewards = batch_perform_rollout(is_random_policy, state, env, subkeys)
+    
     mean_cumulative_reward = cumulative_rewards.mean()
 
-    return inputs_dynamics, outputs_dynamics, mean_cumulative_reward
-
-def reshape_dataset(dataset, args):
-
-    # reshape 
-    dataset = dataset.reshape((int(dataset.size / dataset.shape[2] / args.batch_size), args.batch_size, dataset.shape[2]))
-
-    # convert to jax numpy array
-    dataset = np.array(dataset)
-
-    return dataset
+    return actions, observations, mean_cumulative_reward
 
 def optimise_model(model, params, args, key):
 
@@ -228,17 +236,58 @@ def optimise_model(model, params, args, key):
 
             is_random_policy = False
 
-        inputs_dynamics, outputs_dynamics, mean_cumulative_reward = collect_data(env, is_random_policy, batch_perform_rollout, state, next(subkey), args)
+        actions, observations, mean_cumulative_reward = collect_data(env, is_random_policy, batch_perform_rollout, state, next(subkey), args)
+
+        if iteration == 0:
+
+            all_actions = np.copy(actions)
+            all_observations = np.copy(observations)
+
+        else:
+
+            all_actions = np.vstack((all_actions, actions))
+            all_observations = np.vstack((all_observations, observations))
 
         print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
-
-        # reshape dataset into batches
-        inputs_dynamics = reshape_dataset(inputs_dynamics, args)
-        outputs_dynamics = reshape_dataset(outputs_dynamics, args)
 
         ###########################################
         ########## train dynamics model ###########
         ###########################################
+
+        for update in range(args.n_updates):
+            
+            # start epoch timer
+            epoch_start_time = time.time()
+
+            # generate subkeys
+            # key, training_subkeys = keyGen(key, n_subkeys = args.n_batches)
+
+            # initialise the losses and the timer
+            training_loss = 0
+            batch_start_time = time.time()
+
+            # loop over batches
+            for batch in range(1, actions.shape[0] + 1):
+
+                # train the  dynamics model
+                state, loss = train_step_jit(state, actions[batch,:,:,:], observations[batch,:,:,:])
+
+                # average training loss
+                training_loss = training_loss + loss / (actions.shape[0] + 1)
+
+            if epoch == 0 or epoch == args.n_epochs - 1:
+
+                # end batches timer
+                epoch_duration = time.time() - epoch_start_time
+
+                # print metrics
+                print_metrics("batch", epoch_duration, training_loss, batch_range = [batch - args.print_every + 1, batch], 
+                              lr = lr_scheduler(state.step - 1))
+
+
+
+
+
 
         # loop over epochs
         for epoch in range(args.n_epochs):
@@ -254,13 +303,13 @@ def optimise_model(model, params, args, key):
             batch_start_time = time.time()
 
             # loop over batches
-            for batch in range(1, inputs_dynamics.shape[0] + 1):
+            for batch in range(1, actions.shape[0] + 1):
 
                 # train the  dynamics model
-                state, mse = train_step_jit(state, inputs_dynamics[batch,:,:], outputs_dynamics[batch,:,:])
+                state, loss = train_step_jit(state, actions[batch,:,:,:], observations[batch,:,:,:])
 
                 # average training loss
-                training_loss = training_loss + mse / (inputs_dynamics.shape[0] + 1)
+                training_loss = training_loss + loss / (actions.shape[0] + 1)
 
             if epoch == 0 or epoch == args.n_epochs - 1:
 

@@ -8,11 +8,13 @@ import os
 # action noise magnitude
 
 # things to do
+# sort out reward in dynamics_model
+# dataset should be growing in size! - but sample minibatches so not training on all data! (as in Learning Latent Dynamics for Planning from Pixels or BLENDING MPC & VALUE FUNCTION APPROXIMATION FOR EFFICIENT REINFORCEMENT LEARNING)
+# check lambda in predict_return is working ok (function works when parameters and arguments change)
+
 # have a condition flag for using true vs learned dynamics
 # incorporate continuation/termination flag into learned dynamics?
 # only clip when passing to dynamics function, not when performing MPPI (think about whether clipped/unclipped should be passed to dyanmics fucntions and VAE)
-# maybe train dynamics model to predict change in state not next state
-# dataset should be growing in size! - but sample minibatches so not training on all data! (as in Learning Latent Dynamics for Planning from Pixels or BLENDING MPC & VALUE FUNCTION APPROXIMATION FOR EFFICIENT REINFORCEMENT LEARNING)
 # use scan for rollout render
 # how to choose noise variance?
 # smooth actions?
@@ -34,7 +36,8 @@ def main():
     parser.add_argument('--reload_folder_name',      default = 'saved_model')
 
     # model
-    parser.add_argument('--jax_seed',                type = int, default = 0)
+    parser.add_argument('--jax_seed',                type = int, default = 1)
+    parser.add_argument('--carry_dim',               type = int, default = 200)
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
@@ -62,7 +65,10 @@ def main():
     parser.add_argument('--print_every',             type = int, default = 50)
     parser.add_argument('--n_epochs',                type = int, default = 40)
     parser.add_argument('--n_model_iterations',      type = int, default = 500)
-    parser.add_argument('--batch_size',              type = int, default = 25) # 30
+    parser.add_argument('--batch_size',              type = int, default = 15) # 30
+    parser.add_argument('--n_batches',               type = int, default = 50) # 30
+    parser.add_argument('--chunk_length',            type = int, default = 50)
+    parser.add_argument('--n_updates',               type = int, default = 100)
     parser.add_argument('--min_delta',               type = float, default = 1e-3)
     parser.add_argument('--patience',                type = int, default = 2)
 
@@ -100,29 +106,29 @@ def main():
 
     # import jax
     # jax.profiler.start_trace('runs/' + folder_name)
-    # optimise_model(model, params, args, key)
+    optimise_model(model, params, args, key)
     # jax.profiler.stop_trace()
 
-    from train import render_rollout
-    from brax.v1 import envs
-    from jax import random
-    from controllers import MPPI
-    import numpy as np
-    env = envs.create(env_name = args.environment_name)
-    mppi = MPPI(env, args)
-    state = []
-    iteration = 1
-    n_targets = 10
-    actions = np.empty((env.action_size, args.time_steps, n_targets))
-    for target in range(n_targets):
-        key = random.PRNGKey(args.jax_seed + target)
-        actions[:, :, target] = render_rollout(env, mppi, state, iteration, args, key)
+    # from train import render_rollout
+    # from brax.v1 import envs
+    # from jax import random
+    # from controllers import MPPI
+    # import numpy as np
+    # env = envs.create(env_name = args.environment_name)
+    # mppi = MPPI(env, args)
+    # state = []
+    # iteration = 1
+    # n_targets = 1
+    # actions = np.empty((env.action_size, args.time_steps, n_targets))
+    # for target in range(n_targets):
+    #     key = random.PRNGKey(args.jax_seed + target)
+    #     actions[:, :, target] = render_rollout(env, mppi, state, iteration, args, key)
 
-    from matplotlib import pyplot as plt
-    for target in range(n_targets):
-        plt.plot(actions[0, :, target], actions[1, :, target], '.')
-    plt.show()
-    breakpoint()
+    # from matplotlib import pyplot as plt
+    # for target in range(n_targets):
+    #     plt.plot(actions[0, :, target], actions[1, :, target], '.')
+    # plt.show()
+    # breakpoint()
 
 if __name__ == '__main__':
 

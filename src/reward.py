@@ -27,3 +27,13 @@ def reward_function(observation, action, next_observation):
     reward = 10 * reward_dist + 1 * reward_ctrl
 
     return reward
+
+def expected_reward(action, mu, log_var):
+
+    state_reward = -np.linalg.norm(mu[8:])
+
+    action_reward = -np.sum(action ** 2)
+
+    reward = 10 * state_reward + 1 * action_reward
+
+    return reward

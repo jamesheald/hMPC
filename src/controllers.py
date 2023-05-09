@@ -119,9 +119,9 @@ class MPPI:
 
         #     break
 
-        # predict = partial(self.ground_truth_dynamics_one_step_prediction, env, state)
+        predict = partial(self.ground_truth_dynamics_one_step_prediction, env, state)
         # predict = partial(self.learned_dynamics_one_step_prediction, env, state)
-        predict = partial(self.learned_dynamics_one_step_prediction_GRU, env, state)
+        # predict = partial(self.learned_dynamics_one_step_prediction_GRU, env, state)
 
         # update the mean of the action sequence distribution
         action_sequence_mean = self.update_action_sequence(predict, env_state, action_sequence_mean, key)
