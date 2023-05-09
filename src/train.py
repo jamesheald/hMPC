@@ -107,8 +107,8 @@ def loss_fn(params, state, actions, observations):
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
     mu, log_var, _ = batch_rollout_prediction(params, observations[:, 0, :], actions)
 
-    # log probability of the sequence of observations
-    loss = log_likelihood_diagonal_Gaussian(observations[:, 1:, :], mu + observations[:, 0, None, :], log_var).mean()
+    # negative log probability of the sequence of observations
+    loss = -log_likelihood_diagonal_Gaussian(observations[:, 1:, :], mu + observations[:, 0, None, :], log_var).mean()
 
     return loss
 
@@ -119,31 +119,30 @@ def sample_sequence_chunk(actions, observations, chunk_length, key):
     key, subkeys = keyGen(key, n_subkeys = 2)
 
     # sample an episode
-    e = jax.random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[0])
+    e = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[0])
 
     # sample a time step
-    t = jax.random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[1] - chunk_length)
+    t = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[1] - chunk_length)
 
-    sampled_actions = actions[e,t:t + chunk_length,:]
-    sampled_observations = observations[e,t:t + chunk_length + 1,:]
+    sampled_actions = lax.dynamic_slice(actions, (e[0], t[0], 0), (1, chunk_length, actions.shape[2]))[0,:,:]
+    sampled_observations = lax.dynamic_slice(observations, (e[0], t[0], 0), (1, chunk_length + 1, observations.shape[2]))[0,:,:]
 
     return sampled_actions, sampled_observations
 
 batch_sample_sequence_chunk = vmap(sample_sequence_chunk, in_axes = (None, None, None, 0))
 
-def train_step(state, actions, observations, n_batches, chunk_length, key):
+def train_step(state, actions, observations, key, n_batches, chunk_length):
 
     subkeys = random.split(key, n_batches)
 
-    sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, subkeys):
+    # sampled_actions, sampled_observations = sample_sequence_chunk(actions, observations, chunk_length, key)
+    sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, subkeys)
     
     loss, grads = loss_grad(state.params, state, sampled_actions, sampled_observations)
 
     state = state.apply_gradients(grads = grads)
     
     return state, loss
-
-train_step_jit = jit(train_step)
 
 def random_action(controller, env, env_state, state, action_sequence_mean, key):
 
@@ -230,6 +229,8 @@ def optimise_model(model, params, args, key):
 
     batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
 
+    train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length))
+
     # loop over iterations
     for iteration in range(args.n_model_iterations):
 
@@ -272,12 +273,12 @@ def optimise_model(model, params, args, key):
         for update in range(args.n_updates):
 
             # perform a parameter update
-            state, loss = train_step_jit(state, all_actions, all_observations, args.n_batches, args.chunk_length, next(subkey))
+            state, loss = train_step_jit(state, all_actions, all_observations, next(subkey))
 
             # compute the average training loss
             training_loss = (training_loss * update + loss) / (update + 1)
 
-            if update == 0 or update == args.n_updates - 1:
+            if update == args.n_updates - 1:
 
                 # calculate duration
                 train_duration = time.time() - train_start_time
