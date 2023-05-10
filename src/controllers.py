@@ -88,8 +88,8 @@ class MPPI:
         action_sequences = action_sequence_mean + eps
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
-        # total_reward = self.batch_estimate_cumulative_reward(state, env_state.obs, action_sequences) # use this for learned GRU dynamics
-        total_reward = self.batch_estimate_return(predict, env_state, action_sequences) # use this for ground truth
+        total_reward = self.batch_estimate_cumulative_reward(state, env_state.obs, action_sequences) # use this for learned GRU dynamics
+        # total_reward = self.batch_estimate_return(predict, env_state, action_sequences) # use this for ground truth
 
         # assign a weight to each action sequence based on its cumulative reward
         weights = nn.activation.softmax(total_reward * self.reward_weighting_factor)

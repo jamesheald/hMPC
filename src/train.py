@@ -49,7 +49,7 @@ def get_camera(env, env_state, width, height):
 
     return camera
 
-def render_rollout(env, controller, state, iteration, args, key):
+def render_rollout(env, controller, state, iteration, args, key, seed = 0):
 
     # jit environment and mpc policy
     jit_env_step = jit(env.step)
@@ -68,18 +68,15 @@ def render_rollout(env, controller, state, iteration, args, key):
     width = 320
     height = 240
     actions = np.empty((env.action_size, args.time_steps))
+    cumulative_reward = 0
     for time in range(args.time_steps):
 
-        if iteration == 0:
-
-            action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
-
-        else:
-
-            action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
+        # action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
+        action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
 
         actions = actions.at[:, time].set(action)
         env_state = jit_env_step(env_state, action)
+        cumulative_reward += env_state.reward
         rollout.append(env_state)
         cameras.append(get_camera(env, env_state, width, height))
 
@@ -87,9 +84,24 @@ def render_rollout(env, controller, state, iteration, args, key):
 
     # create and save a gif of the rollout
     gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
-    open('runs/' + args.folder_name + '/output_' + str(iteration) + '.gif', 'wb').write(gif.data)
+    open('runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif', 'wb').write(gif.data)
 
-    return actions
+    return actions, cumulative_reward
+
+def evaluate_model(env, controller, state, iteration, args):
+
+    cumulative_reward_list = []
+    for seed in range(args.n_eval_envs):
+
+        key = random.PRNGKey(seed)
+
+        _, cumulative_reward = render_rollout(env, controller, state, iteration, args, key, seed)
+        
+        cumulative_reward_list.append(cumulative_reward)
+
+    print("cumulative_reward_list:", cumulative_reward_list)
+
+    return None
 
 def log_likelihood_diagonal_Gaussian(x, mu, log_var):
     """
@@ -234,8 +246,12 @@ def optimise_model(model, params, args, key):
 
     train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length))
 
-    # loop over iterations
     for iteration in range(args.n_model_iterations):
+
+        # periodically evaluate the model
+        if iteration % args.eval_every == 0:
+
+            evaluate_model(env, mppi, state, iteration, args)
 
         ###########################################
         ########## collect data ###################
@@ -254,6 +270,8 @@ def optimise_model(model, params, args, key):
 
         actions, observations, mean_cumulative_reward = collect_data(env, is_random_policy, batch_perform_rollout, state, next(subkey), args)
 
+        print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
+
         if iteration == 0:
 
             all_actions = np.copy(actions)
@@ -264,7 +282,7 @@ def optimise_model(model, params, args, key):
             all_actions = np.vstack((all_actions, actions))
             all_observations = np.vstack((all_observations, observations))
 
-        print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
+        print('iteration: {}, number of episodes in dataset: {:.4f}'.format(iteration, all_actions.shape[0]))
 
         ###########################################
         ########## train dynamics model ###########
@@ -320,7 +338,6 @@ def optimise_model(model, params, args, key):
 
             # save checkpoint
             checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = iteration)
-
 
             # if epoch % 50 == 0:
 

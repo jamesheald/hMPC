@@ -44,13 +44,5 @@ def create_tensorboard_writer(args):
 
 def write_metrics_to_tensorboard(writer, t_losses, v_losses, epoch):
 
-	writer.scalar('VAE loss (train)', t_losses['total'].mean(), epoch)
-	writer.scalar('cross entropy (train)', t_losses['cross_entropy'].mean(), epoch)
-	writer.scalar('mse (train)', t_losses['mse'].mean(), epoch)
-	writer.scalar('KL (train)', t_losses['kl'].mean(), epoch)
-	writer.scalar('KL prescale (train)', t_losses['kl_prescale'].mean(), epoch)
-	writer.scalar('VAE loss (validation)', v_losses['total'].mean(), epoch)
-	writer.scalar('cross entropy (validation)', v_losses['cross_entropy'].mean(), epoch)
-	writer.scalar('KL (validation)', v_losses['kl'].mean(), epoch)
-	writer.scalar('KL prescale (validation)', v_losses['kl_prescale'].mean(), epoch)
+	writer.scalar('GRU loss (train)', t_losses['total'].mean(), epoch)
 	writer.flush()
