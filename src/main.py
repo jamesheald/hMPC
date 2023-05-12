@@ -54,7 +54,7 @@ def main():
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',        default = 'reacher')
     parser.add_argument('--n_rollouts',              type = int, default = 1) # 30
-    parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
+    parser.add_argument('--time_steps',              type = int, default = 100) # 50, 1000 
     
     # model evluation
     parser.add_argument('--eval_every',              type = int, default = 10)
@@ -107,8 +107,6 @@ def main():
     file = open(path, 'wb') # change 'wb' to 'rb' to load
     pickle.dump(args, file) # change to args = pickle.load(file) to load
     file.close()
-
-    print('eventually remove if epoch % 50 == 0 code')
 
     # from jax.config import config
     # config.update("jax_disable_jit", True)
