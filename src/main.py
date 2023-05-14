@@ -9,6 +9,8 @@ import os
 
 # things to do
 
+# change GRU for transformer
+
 # save collected data so you can easily train GRUs/VAEs for testing ideas!!!
 # why do we need to use a random policy in first iteration (you don't need to in principal i don't think), is it just to save computational costs?
 
@@ -57,7 +59,7 @@ def main():
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',        default = 'reacher')
     parser.add_argument('--n_rollouts',              type = int, default = 5) # 30
-    parser.add_argument('--time_steps',              type = int, default = 100) # 50, 1000 
+    parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
     
     # model evluation
     parser.add_argument('--eval_every',              type = int, default = 10) # 10
@@ -79,7 +81,7 @@ def main():
     parser.add_argument('--decay_steps',             type = int, default = 1)
     parser.add_argument('--decay_factor',            type = float, default = 1) # 0.9999 (1 is constant learning rate)
     parser.add_argument('--print_every',             type = int, default = 50)
-    parser.add_argument('--n_model_iterations',      type = int, default = 500)
+    parser.add_argument('--n_model_iterations',      type = int, default = 1000)
     parser.add_argument('--n_batches',               type = int, default = 50) # 50, 30
     parser.add_argument('--chunk_length',            type = int, default = 50) # 50, shouldn't this be equal to planning horizon?
     parser.add_argument('--n_updates',               type = int, default = 100)

@@ -78,14 +78,23 @@ def evaluate_model(env, controller, state, iteration, args):
 
     return None
 
-def log_likelihood_diagonal_Gaussian(x, mu, log_var):
+def log_likelihood_diagonal_Gaussian(x_including_nans, mu, log_var):
     """
     Calculate the log likelihood of x under a diagonal Gaussian distribution
     var_min is added to the variances for numerical stability
     """
     log_var = stabilise_variance(log_var)
+
+    # set nans to 0 to avoid nan gradients
+    x = np.where(np.isnan(x_including_nans), x = 0, y = x_including_nans)
+
+    # calculate the log likelihood
+    log_likelihood = -0.5 * (log_var + np.log(2 * np.pi) + (x - mu) ** 2 / np.exp(log_var))
+
+    # set terms associated with nans to zero
+    log_likelihood = np.where(np.isnan(x_including_nans), x = 0, y = log_likelihood)
     
-    return np.sum(-0.5*(log_var + np.log(2*np.pi) + (x - mu)**2/np.exp(log_var)))
+    return np.sum(log_likelihood)
 
 def loss_fn(params, state, actions, observations):
 
@@ -101,7 +110,7 @@ def loss_fn(params, state, actions, observations):
     theta = batch_calculate_theta(observations)
 
     # calculate the negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(np.concatenate((theta[1:, :], observations[1:, [6, 7, 8, 9]]), axis = 1), mu + np.concatenate((theta[0, :], observations[0, [6, 7, 8, 9]])), log_var)
+    loss = -log_likelihood_diagonal_Gaussian(np.concatenate((theta[1:, :], observations[1:, [6, 7, 8, 9]]), axis = 1) - np.concatenate((theta[0, :], observations[0, [6, 7, 8, 9]])), mu, log_var)
 
     return loss
 
@@ -115,7 +124,7 @@ def loss(params, state, actions, observations):
 
 loss_grad = value_and_grad(loss)
 
-def sample_sequence_chunk(actions, observations, chunk_length, key):
+def sample_sequence_chunk(actions, observations, chunk_length, time_steps, key):
 
     key, subkeys = keyGen(key, n_subkeys = 2)
 
@@ -123,20 +132,20 @@ def sample_sequence_chunk(actions, observations, chunk_length, key):
     e = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[0])
 
     # sample a time step
-    t = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = observations.shape[1] - chunk_length)
+    t = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = time_steps) # observations.shape[1] - chunk_length)
 
     sampled_actions = lax.dynamic_slice(actions, (e[0], t[0], 0), (1, chunk_length, actions.shape[2]))[0,:,:]
     sampled_observations = lax.dynamic_slice(observations, (e[0], t[0], 0), (1, chunk_length + 1, observations.shape[2]))[0,:,:]
 
     return sampled_actions, sampled_observations
 
-batch_sample_sequence_chunk = vmap(sample_sequence_chunk, in_axes = (None, None, None, 0))
+batch_sample_sequence_chunk = vmap(sample_sequence_chunk, in_axes = (None, None, None, None, 0))
 
-def train_step(state, actions, observations, key, n_batches, chunk_length):
+def train_step(state, actions, observations, key, n_batches, chunk_length, time_steps):
 
     subkeys = random.split(key, n_batches)
 
-    sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, subkeys)
+    sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, time_steps, subkeys)
     
     loss, grads = loss_grad(state.params, state, sampled_actions, sampled_observations)
 
@@ -206,6 +215,12 @@ def collect_data(env, is_random_policy, batch_perform_rollout, state, key, args)
 
     return actions, observations, mean_cumulative_reward
 
+def pad_data(data, args, fill_value = np.nan):
+
+    padded_data = np.concatenate((data, np.full((data.shape[0], args.horizon, data.shape[2]), fill_value)), axis = 1)
+
+    return padded_data
+
 def optimise_model(model, params, args, key):
 
     # start optimisation timer
@@ -227,7 +242,7 @@ def optimise_model(model, params, args, key):
 
     batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
 
-    train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length))
+    train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
 
     for iteration in range(args.n_model_iterations):
 
@@ -257,13 +272,13 @@ def optimise_model(model, params, args, key):
 
         if iteration == 0:
 
-            all_actions = np.copy(actions)
-            all_observations = np.copy(observations)
+            all_actions = pad_data(actions, args, fill_value = 0)
+            all_observations = pad_data(observations, args)
 
         else:
 
-            all_actions = np.vstack((all_actions, actions))
-            all_observations = np.vstack((all_observations, observations))
+            all_actions = np.vstack((all_actions, pad_data(actions, args, fill_value = 0)))
+            all_observations = np.vstack((all_observations, pad_data(observations, args)))
 
         print('iteration: {}, number of episodes in dataset: {:.4f}'.format(iteration, all_actions.shape[0]))
 
