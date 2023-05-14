@@ -5,14 +5,11 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
+from utils import keyGen, stabilise_variance, batch_calculate_theta, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
-from brax.v1 import envs
-from brax.v1.io import image
-from brax.v1.io.image import _eye, _up
-from IPython.display import Image 
-from pytinyrenderer import TinyRenderCamera as Camera
+from brax import envs
+from render import get_camera, create_gif
 
 def get_train_state(model, param, args):
     
@@ -29,26 +26,6 @@ def get_train_state(model, param, args):
 
     return state, lr_scheduler
 
-def get_camera(env, env_state, width, height):
-
-    sys = env.sys
-    qp = env_state.qp
-    ssaa = 2
-    eye, up = _eye(sys, qp), _up(sys)
-    hfov = 5.0
-    vfov = hfov * height / width
-    target = [qp.pos[0, 0], qp.pos[0, 1], 0]
-    camera = Camera(
-        viewWidth = width * ssaa,
-        viewHeight = height * ssaa,
-        position = eye,
-        target = target,
-        up = up,
-        hfov = hfov,
-        vfov = vfov)
-
-    return camera
-
 def render_rollout(env, controller, state, iteration, args, key, seed = 0):
 
     # jit environment and mpc policy
@@ -64,9 +41,7 @@ def render_rollout(env, controller, state, iteration, args, key, seed = 0):
 
     # perform rollout
     rollout = []
-    cameras = []
-    width = 320
-    height = 240
+
     actions = np.empty((env.action_size, args.time_steps))
     cumulative_reward = 0
     for time in range(args.time_steps):
@@ -77,14 +52,14 @@ def render_rollout(env, controller, state, iteration, args, key, seed = 0):
         actions = actions.at[:, time].set(action)
         env_state = jit_env_step(env_state, action)
         cumulative_reward += env_state.reward
-        rollout.append(env_state)
-        cameras.append(get_camera(env, env_state, width, height))
+        rollout.append(env_state.pipeline_state)
+
+    cameras = [get_camera()] * args.time_steps
 
     # (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
 
     # create and save a gif of the rollout
-    gif = Image(image.render(env.sys, [s.qp for s in rollout], cameras = cameras, width = width, height = height, fmt = 'gif'))
-    open('runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif', 'wb').write(gif.data)
+    create_gif(env, rollout, cameras, 'runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif')
 
     return actions, cumulative_reward
 
@@ -114,11 +89,19 @@ def log_likelihood_diagonal_Gaussian(x, mu, log_var):
 
 def loss_fn(params, state, actions, observations):
 
+    # # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
+    # mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
+
+    # # calculate the negative log probability of the sequence of observations
+    # loss = -log_likelihood_diagonal_Gaussian(observations[1:, :], mu + observations[0, None, :], log_var)
+
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
+    mu, log_var, _ = state.apply_fn(params, observations[0, [0, 1, 2, 3, 6, 7, 8, 9]], actions)
+
+    theta = batch_calculate_theta(observations)
 
     # calculate the negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(observations[1:, :], mu + observations[0, None, :], log_var)
+    loss = -log_likelihood_diagonal_Gaussian(np.concatenate((theta[1:, :], observations[1:, [6, 7, 8, 9]]), axis = 1), mu + np.concatenate((theta[0, :], observations[0, [6, 7, 8, 9]])), log_var)
 
     return loss
 

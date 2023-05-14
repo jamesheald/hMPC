@@ -18,6 +18,8 @@ import os
 # check clipping etc - maybe leave for now as worked fine with true dynamics model
 # could calculate dynamics loss on separate unseen validation dataset to monitor progress and decide when to stop (maybe less relevant as training dataset is growing?)
 
+# determine gradient clipping value by logging gradient norms during training and assessing
+
 # tensorboard - save loss function, save gifs and rewards on a small number (say 3) of examples
 
 # check lambda in predict_return is working ok (function works when parameters and arguments change)
@@ -35,6 +37,7 @@ os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 from initialise import initialise_model
 from train import optimise_model
+# from assess_model_learning import optimise_model
 
 def main():
 
@@ -53,11 +56,11 @@ def main():
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',        default = 'reacher')
-    parser.add_argument('--n_rollouts',              type = int, default = 1) # 30
+    parser.add_argument('--n_rollouts',              type = int, default = 5) # 30
     parser.add_argument('--time_steps',              type = int, default = 100) # 50, 1000 
     
     # model evluation
-    parser.add_argument('--eval_every',              type = int, default = 10)
+    parser.add_argument('--eval_every',              type = int, default = 10) # 10
     parser.add_argument('--n_eval_envs',             type = int, default = 2) # 50, 1000
 
     # MPPI
@@ -65,23 +68,20 @@ def main():
     parser.add_argument('--n_sequences',             type = int, default = 200) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
     parser.add_argument('--noise_std',               type = float, default = 0.1)
-    # parser.add_argument('--myosuite_dt',             type = float, default = 0.02)
 
     # optimisation
     parser.add_argument('--adam_b1',                 type = float, default = 0.9)
     parser.add_argument('--adam_b2',                 type = float, default = 0.999)
     parser.add_argument('--adam_eps',                type = float, default = 1e-8)
-    parser.add_argument('--weight_decay',            type = float, default = 0.0001)
+    parser.add_argument('--weight_decay',            type = float, default = 0) # 0.0001 (0 is adam not adamw)
     parser.add_argument('--max_grad_norm',           type = float, default = 10.0)
     parser.add_argument('--step_size',               type = float, default = 0.001)
     parser.add_argument('--decay_steps',             type = int, default = 1)
-    parser.add_argument('--decay_factor',            type = float, default = 0.9999)
+    parser.add_argument('--decay_factor',            type = float, default = 1) # 0.9999 (1 is constant learning rate)
     parser.add_argument('--print_every',             type = int, default = 50)
-    # parser.add_argument('--n_epochs',                type = int, default = 40)
     parser.add_argument('--n_model_iterations',      type = int, default = 500)
-    # parser.add_argument('--batch_size',              type = int, default = 15) # 30
-    parser.add_argument('--n_batches',               type = int, default = 50) # 30
-    parser.add_argument('--chunk_length',            type = int, default = 50) # shouldn't this be equal to planning horizon?
+    parser.add_argument('--n_batches',               type = int, default = 50) # 50, 30
+    parser.add_argument('--chunk_length',            type = int, default = 50) # 50, shouldn't this be equal to planning horizon?
     parser.add_argument('--n_updates',               type = int, default = 100)
     parser.add_argument('--min_delta',               type = float, default = 1e-3)
     parser.add_argument('--patience',                type = int, default = 2)

@@ -59,7 +59,7 @@ class MPPI:
 
     def estimate_cumulative_reward(self, state, observation, action_sequence):
 
-        _, _, cumulative_reward = state.apply_fn(state.params, observation, action_sequence)
+        _, _, cumulative_reward = state.apply_fn(state.params, observation[np.array([0, 1, 2, 3, 6, 7, 8, 9])], action_sequence)
 
         return cumulative_reward
 

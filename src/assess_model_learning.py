@@ -5,14 +5,15 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
+from utils import keyGen, stabilise_variance, batch_calculate_theta, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
-from brax.v1 import envs
-from brax.v1.io import image
-from brax.v1.io.image import _eye, _up
-from IPython.display import Image 
-from pytinyrenderer import TinyRenderCamera as Camera
+from brax import envs
+
+from brax.kinematics import forward
+from render import forward_kinematics, get_camera, create_gif, merge_gifs
+import imageio
+import os
 
 def get_train_state(model, param, args):
     
@@ -29,25 +30,56 @@ def get_train_state(model, param, args):
 
     return state, lr_scheduler
 
-def get_camera(env, env_state, width, height):
+def render_observations(env, actions, observations, state, iteration):
 
-    sys = env.sys
-    qp = env_state.qp
-    ssaa = 2
-    eye, up = _eye(sys, qp), _up(sys)
-    hfov = 5.0
-    vfov = hfov * height / width
-    target = [qp.pos[0, 0], qp.pos[0, 1], 0]
-    camera = Camera(
-        viewWidth = width * ssaa,
-        viewHeight = height * ssaa,
-        position = eye,
-        target = target,
-        up = up,
-        hfov = hfov,
-        vfov = vfov)
+    env_state = env.reset(rng = random.PRNGKey(0))
+    pipeline_state = copy(env_state.pipeline_state)
 
-    return camera
+    jit_forward = jit(forward)
+
+    # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
+    mu, log_var, _ = state.apply_fn(state.params, observations[0, [0, 1, 2, 3, 6, 7, 8, 9]], actions)
+
+    true_rollout = []
+    predicted_rollout = []
+    time_steps = observations.shape[0]
+    for time in range(time_steps):
+
+        if time == 0:
+
+            pipeline_state = forward_kinematics(env, observations[time,:], pipeline_state)
+            true_rollout.append(pipeline_state)
+            predicted_rollout.append(pipeline_state)
+
+        else:
+
+            pipeline_state = forward_kinematics(env, observations[time,:], pipeline_state)
+            true_rollout.append(pipeline_state)
+
+            # pipeline_state = forward_kinematics(env, mu[time - 1,:], pipeline_state)
+            q = np.concatenate([mu[time - 1, :2], observations[time, 4:6]])
+            x, _ = jit_forward(env.sys, q, np.zeros(4,))
+            pipeline_state = pipeline_state.replace(x = x)
+            predicted_rollout.append(pipeline_state)
+
+    cameras = [get_camera()] * time_steps
+
+    # create and save a gif of the state-based rollout
+    create_gif(env, true_rollout, cameras, 'true_rollout.gif')
+
+    # create and save a gif of the observation-based rollout
+    create_gif(env, predicted_rollout, cameras, 'predicted_rollout.gif')
+
+    # merge both gifs into one (side-by-side)
+    gif1 = imageio.get_reader('true_rollout.gif')
+    gif2 = imageio.get_reader('predicted_rollout.gif')
+    merge_gifs(gif1, gif2, 'rollout_' + str(iteration) + '.gif', env.dt)
+
+    # delete original gifs
+    os.remove('true_rollout.gif')
+    os.remove('predicted_rollout.gif')
+
+    return None
 
 def render_rollout(env, controller, state, iteration, args, key, seed = 0):
 
@@ -115,10 +147,12 @@ def log_likelihood_diagonal_Gaussian(x, mu, log_var):
 def loss_fn(params, state, actions, observations):
 
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
+    mu, log_var, _ = state.apply_fn(params, observations[0, [0, 1, 2, 3, 6, 7, 8, 9]], actions)
+
+    theta = batch_calculate_theta(observations)
 
     # calculate the negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(observations[1:, :], mu + observations[0, None, :], log_var)
+    loss = -log_likelihood_diagonal_Gaussian(np.concatenate((theta[1:, :], observations[1:, [6, 7, 8, 9]]), axis = 1), mu + np.concatenate((theta[0, :], observations[0, [6, 7, 8, 9]])), log_var)
 
     return loss
 
@@ -249,7 +283,9 @@ def optimise_model(model, params, args, key):
     # collect dataset
     key, subkey = keyGen(key, n_subkeys = 1)
 
-    actions, observations, mean_cumulative_reward = collect_data(env, is_random_policy = True, batch_perform_rollout, state, next(subkey), args)
+    is_random_policy = True
+
+    actions, observations, mean_cumulative_reward = collect_data(env, is_random_policy, batch_perform_rollout, state, next(subkey), args)
 
     all_actions = np.copy(actions)
     all_observations = np.copy(observations)
@@ -259,7 +295,7 @@ def optimise_model(model, params, args, key):
         # periodically evaluate the model
         if iteration % args.eval_every == 0:
 
-            evaluate_model(env, mppi, state, iteration, args)
+            render_observations(env, actions[0, :, :], observations[0, :, :], state, iteration)
 
         ###########################################
         ########## collect data ###################

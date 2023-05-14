@@ -14,6 +14,45 @@ def stabilise_variance(log_var, var_min = 1e-16):
 	"""
 	return np.log(np.exp(log_var) + var_min)
 
+def calculate_theta(observations):
+
+    theta = np.empty(2)
+    for joint in range(2):
+        
+        cos_theta = observations[joint]
+        sine_theta = observations[joint + 2]
+
+        cos_options = np.array([np.arccos(cos_theta), -np.arccos(cos_theta)])
+        sine_options = np.array([np.arcsin(sine_theta), -np.pi - np.arcsin(sine_theta), np.pi - np.arcsin(sine_theta)])
+        
+        # find the option common to both cos and sine
+        dist = cos_options[:, None] - sine_options[None, :]
+        i = np.argmin(np.min(np.abs(dist), axis = 1))
+        
+        theta = theta.at[joint].set(cos_options[i])
+
+        # options = [np.arccos(cos_theta), -np.arccos(cos_theta), np.arcsin(sin_theta)]
+        
+        # if np.arcsin(sin_theta) < 0:
+        
+        #     options.append(-np.pi - np.arcsin(sin_theta))
+
+        # else:
+            
+        #     options.append(np.pi - np.arcsin(sin_theta))
+
+        # for i, j in product(range(2), range(2)):
+
+        #     if np.isclose(options[i], options[j + 2], atol = 1e-3):
+
+        #         theta = theta.at[joint].set(options[i])
+
+        #         break
+
+    return theta
+
+batch_calculate_theta = vmap(calculate_theta, in_axes = (0,))
+
 def print_metrics(phase, duration, t_losses, v_losses = [], batch_range = [], lr = [], epoch = []):
 	
 	if phase == "batch":

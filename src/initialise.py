@@ -36,7 +36,7 @@ class observation_encoder(nn.Module):
         return carry
 
 class dynamics_model(nn.Module):
-    observation_dim: int
+    prediction_dim: int
 
     @nn.compact
     def __call__(self, carry, action):
@@ -45,19 +45,19 @@ class dynamics_model(nn.Module):
         carry, outputs = nn.GRUCell(kernel_init = nn.initializers.lecun_normal())(carry, action)
         
         # mean and log variances of Gaussian distribution over next state
-        mu, log_var = np.split(nn.Dense(features = self.observation_dim * 2)(outputs), 2)
+        mu, log_var = np.split(nn.Dense(features = self.prediction_dim * 2)(outputs), 2)
 
         return carry, (mu, log_var)
 
 class rollout_prediction(nn.Module):
     carry_dim: int
-    observation_dim: int
+    prediction_dim: int
     action_dim: int
 
     def setup(self):
         
         self.encoder = observation_encoder(self.carry_dim)
-        self.dynamics = dynamics_model(self.observation_dim)
+        self.dynamics = dynamics_model(self.prediction_dim)
         self.dynamics_params = self.param('dynamics_params', self.dynamics.init, np.ones(self.carry_dim), np.ones(self.action_dim))
 
     def __call__(self, observation, action_sequence):
@@ -70,7 +70,7 @@ class rollout_prediction(nn.Module):
 
         # calculate the expected cumulative reward under the predicted distribution of future observations
         # future observations are defined relative to the current observation
-        cumulative_reward = batch_expected_reward(action_sequence, mu + observation, log_var).sum()
+        cumulative_reward = batch_expected_reward(action_sequence, mu[:, 4:] + observation[6:], log_var[:, 4:]).sum()
         
         return mu, log_var, cumulative_reward
 
@@ -86,7 +86,7 @@ def initialise_model(args):
     env = envs.create(env_name = args.environment_name)
     # model = dynamics_model_MLP(output_dim = env.observation_size)
     # params = model.init(x = np.ones(env.observation_size + env.action_size), rngs = {'params': next(subkeys)})
-    model = rollout_prediction(carry_dim = args.carry_dim, observation_dim = env.observation_size, action_dim = env.action_size)
-    params = model.init(observation = np.ones(env.observation_size), action_sequence = np.ones((args.horizon, env.action_size)), rngs = {'params': next(subkeys)})
+    model = rollout_prediction(carry_dim = args.carry_dim, prediction_dim = env.observation_size - 5, action_dim = env.action_size)
+    params = model.init(observation = np.ones(env.observation_size - 3), action_sequence = np.ones((args.horizon, env.action_size)), rngs = {'params': next(subkeys)})
 
     return model, params, args, key

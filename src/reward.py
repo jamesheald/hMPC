@@ -31,7 +31,7 @@ def reward_function(observation, action, next_observation):
 
 def expected_reward(action, mu, log_var):
 
-    state_reward = -(mu[8:] @ mu[8:] + np.exp(log_var).sum()) # expectation not of norm (as in original reacher environment) but of norm ** 2
+    state_reward = -(mu @ mu + np.exp(log_var).sum()) # expectation not of norm (as in original reacher environment) but of norm ** 2
 
     action_reward = -np.sum(action ** 2)
 
