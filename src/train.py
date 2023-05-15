@@ -9,7 +9,10 @@ from utils import keyGen, stabilise_variance, batch_calculate_theta, print_metri
 import time
 from copy import copy
 from brax import envs
-from render import get_camera, create_gif
+from brax.kinematics import forward
+from render import get_camera, create_gif, merge_gifs
+import imageio
+import os
 
 def get_train_state(model, param, args):
     
@@ -26,15 +29,18 @@ def get_train_state(model, param, args):
 
     return state, lr_scheduler
 
-def render_rollout(env, controller, state, iteration, args, key, seed = 0):
+def render_rollout(env, controller, state, iteration, args, key, seed, render_prediction):
 
-    # jit environment and mpc policy
+    # jit environment, mpc policy and forward kinematics
     jit_env_step = jit(env.step)
     jit_mpc_action = jit(partial(mpc_action, controller, env))
+    jit_forward = jit(forward)
 
     key, subkeys = keyGen(key, n_subkeys = args.time_steps + 1)
 
     env_state = env.reset(rng = next(subkeys))
+    initial_observation = copy(env_state.obs)
+    pipeline_state = copy(env_state.pipeline_state)
 
     # initialise the mean of the action sequence distribution
     action_sequence_mean = np.zeros((args.horizon, env.action_size))
@@ -42,14 +48,14 @@ def render_rollout(env, controller, state, iteration, args, key, seed = 0):
     # perform rollout
     rollout = []
 
-    actions = np.empty((env.action_size, args.time_steps))
+    actions = np.empty((args.time_steps, env.action_size))
     cumulative_reward = 0
     for time in range(args.time_steps):
 
         # action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
         action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
 
-        actions = actions.at[:, time].set(action)
+        actions = actions.at[time, :].set(action)
         env_state = jit_env_step(env_state, action)
         cumulative_reward += env_state.reward
         rollout.append(env_state.pipeline_state)
@@ -61,16 +67,47 @@ def render_rollout(env, controller, state, iteration, args, key, seed = 0):
     # create and save a gif of the rollout
     create_gif(env, rollout, cameras, 'runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif')
 
+    if render_prediction:
+
+        # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
+        mu, log_var, _ = state.apply_fn(state.params, initial_observation[np.array([0, 1, 2, 3, 6, 7, 8, 9])], actions)
+
+        predicted_rollout = []
+        for time in range(args.time_steps):
+
+            if time == 0:
+
+                predicted_rollout.append(rollout[0])
+
+            else:
+
+                # pipeline_state = forward_kinematics(env, mu[time - 1,:], pipeline_state)
+                q = np.concatenate([mu[time - 1, :2], initial_observation[4:6]])
+                x, _ = jit_forward(env.sys, q, np.zeros(4,))
+                pipeline_state = pipeline_state.replace(x = x)
+                predicted_rollout.append(pipeline_state)
+
+        # create and save a gif of the observation-based rollout
+        create_gif(env, predicted_rollout, cameras, 'predicted_rollout.gif')
+
+        # merge both gifs into one (side-by-side)
+        gif1 = imageio.get_reader('runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif')
+        gif2 = imageio.get_reader('predicted_rollout.gif')
+        merge_gifs(gif1, gif2, 'runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '_prediction' + '.gif', env.dt)
+
+        # delete original gif
+        os.remove('predicted_rollout.gif')
+
     return actions, cumulative_reward
 
 def evaluate_model(env, controller, state, iteration, args):
 
     cumulative_reward_list = []
-    for seed in range(args.n_eval_envs):
+    for seed in range(1, args.n_eval_envs + 1):
 
         key = random.PRNGKey(seed)
 
-        _, cumulative_reward = render_rollout(env, controller, state, iteration, args, key, seed)
+        _, cumulative_reward = render_rollout(env, controller, state, iteration, args, key, seed, render_prediction = True)
         
         cumulative_reward_list.append(cumulative_reward)
 

@@ -52,7 +52,7 @@ def merge_gifs(gif1, gif2, filename, dt):
 
     merged_gif.close()
     gif = imageio.mimread(filename)
-    imageio.mimsave(filename, gif, fps = 1 / dt)
+    imageio.mimsave(filename, gif, fps = 1 / dt / 2)
 
     gif1.close()
     gif2.close()

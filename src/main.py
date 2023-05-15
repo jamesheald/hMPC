@@ -101,7 +101,7 @@ def main():
     # be open minded about the choice of the scaling factor (and bias) on pen_state
     # i don't bound fingertip prediction, as should be on scale of 1 and centered on zero
 
-    # to change an argument via the command line: python main.py --folder_name 'run_1'
+    # to change an argument via the command line: python main.py --reload_folder_name 'run_1' --reload_state True
 
     # save the hyperparameters
     path = 'runs/' + args.folder_name + '/hyperparameters'
