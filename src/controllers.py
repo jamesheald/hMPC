@@ -9,7 +9,8 @@ class MPPI:
     def __init__(self, env, args):
 
         self.horizon = args.horizon
-        self.n_actions = env.action_size
+        # self.n_actions = env.action_size brax
+        self.n_actions = env.action_space.shape[0] # openai gym
         self.n_sequences = args.n_sequences
         self.reward_weighting_factor = args.reward_weighting_factor
         self.noise_std = args.noise_std
@@ -59,14 +60,13 @@ class MPPI:
 
     def estimate_cumulative_reward(self, state, observation, action_sequence):
 
-        _, _, cumulative_reward = state.apply_fn(state.params, observation[np.array([0, 1, 2, 3, 6, 7, 8, 9])], action_sequence)
+        _, _, cumulative_reward = state.apply_fn(state.params, observation, action_sequence)
 
         return cumulative_reward
 
     batch_estimate_cumulative_reward = vmap(estimate_cumulative_reward, in_axes = (None, None, None, 2))
 
-    # def update_action_sequence(self, predict, env_state, action_sequence_mean, key):
-    def update_action_sequence(self, state, predict, env_state, action_sequence_mean, key):
+    def update_action_sequence(self, state, predict, observation, action_sequence_mean, key):
 
         # # sample noise from a normal distribution
         # eps = random.normal(key, (self.horizon, self.n_actions, self.n_sequences)) * self.noise_std
@@ -88,7 +88,7 @@ class MPPI:
         action_sequences = action_sequence_mean + eps
 
         # use the learned model to estimate the cumulative reward associated with each action sequence
-        total_reward = self.batch_estimate_cumulative_reward(state, env_state.obs, action_sequences) # use this for learned GRU dynamics
+        total_reward = self.batch_estimate_cumulative_reward(state, observation, action_sequences) # use this for learned GRU dynamics
         # total_reward = self.batch_estimate_return(predict, env_state, action_sequences) # use this for ground truth
 
         # assign a weight to each action sequence based on its cumulative reward
@@ -99,7 +99,7 @@ class MPPI:
 
         return action_sequence_mean
 
-    def get_action(self, env, env_state, state, action_sequence_mean, key):
+    def get_action(self, env, observation, state, action_sequence_mean, key):
 
         # # find the elite action sequences (i.e. those associated with the highest reward)
         # elite_indices = np.argsort(total_reward)[-self.n_elite:]
@@ -117,7 +117,7 @@ class MPPI:
         # predict = partial(self.learned_dynamics_one_step_prediction_GRU, env, state)
 
         # update the mean of the action sequence distribution
-        action_sequence_mean = self.update_action_sequence(state, predict, env_state, action_sequence_mean, key)
+        action_sequence_mean = self.update_action_sequence(state, predict, observation, action_sequence_mean, key)
 
         # the mean of the optimised action sequence distribution (at the current time step) is the action to take in the environment
         action = np.copy(action_sequence_mean[0, :])

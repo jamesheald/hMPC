@@ -57,9 +57,19 @@ def main():
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
-    parser.add_argument('--environment_name',        default = 'reacher')
+    parser.add_argument('--environment_name',        default = 'muscle_arm-v0')
     parser.add_argument('--n_rollouts',              type = int, default = 5) # 30
     parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
+
+    # # muscle_arm-v0 observations
+    # env.sim.data.qpos[: env.nq],
+    # env.sim.data.qvel[: env.nq],
+    # env.muscle_length(),
+    # env.muscle_velocity(),
+    # env.muscle_force(),
+    # env.muscle_activity(),
+    # env.target,
+    # env.sim.data.get_site_xpos(env.tracking_str)
     
     # model evluation
     parser.add_argument('--eval_every',              type = int, default = 10) # 10

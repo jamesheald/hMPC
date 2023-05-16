@@ -2,27 +2,9 @@ from jax import random, lax, vmap
 from flax import linen as nn
 import jax.numpy as np
 from utils import keyGen
+import gym
 from brax import envs
 from reward import batch_expected_reward
-
-# class dynamics_model_MLP(nn.Module):
-#     output_dim: int
-
-#     @nn.compact
-#     def __call__(self, x):
-        
-#         x = nn.Dense(features = 500)(x)
-#         x = nn.relu(x)
-#         x = nn.Dense(features = 500)(x)
-#         x = nn.relu(x)
-#         x = nn.Dense(features = self.output_dim)(x)
-        
-#         # x = nn.Dense(features = self.x_dim * 2)(x)
-#         # # mean and log variances of Gaussian distribution over next state
-#         # x_mean, x_log_var = np.split(x, 2, axis = 1)
-#         # return {'x_mean': x_mean, 'x_log_var': x_log_var}
-        
-#         return x
 
 class observation_encoder(nn.Module):
     carry_dim: int
@@ -70,7 +52,7 @@ class rollout_prediction(nn.Module):
 
         # calculate the expected cumulative reward under the predicted distribution of future observations
         # future observations are defined relative to the current observation
-        cumulative_reward = batch_expected_reward(action_sequence, mu[:, 4:] + observation[6:], log_var[:, 4:]).sum()
+        cumulative_reward = batch_expected_reward(action_sequence, mu + observation[-self.prediction_dim:], log_var).sum()
         
         return mu, log_var, cumulative_reward
 
@@ -83,10 +65,8 @@ def initialise_model(args):
     key, subkeys = keyGen(key, n_subkeys = 1)
     
     # define the model and initialise its parameters
-    env = envs.create(env_name = args.environment_name)
-    # model = dynamics_model_MLP(output_dim = env.observation_size)
-    # params = model.init(x = np.ones(env.observation_size + env.action_size), rngs = {'params': next(subkeys)})
-    model = rollout_prediction(carry_dim = args.carry_dim, prediction_dim = env.observation_size - 5, action_dim = env.action_size)
-    params = model.init(observation = np.ones(env.observation_size - 3), action_sequence = np.ones((args.horizon, env.action_size)), rngs = {'params': next(subkeys)})
+    env = gym.make(args.environment_name)
+    model = rollout_prediction(carry_dim = args.carry_dim, prediction_dim = 3, action_dim = env.action_space.shape[0])
+    params = model.init(observation = np.ones(env.observation_space.shape[0]), action_sequence = np.ones((args.horizon, env.action_space.shape[0])), rngs = {'params': next(subkeys)})
 
     return model, params, args, key

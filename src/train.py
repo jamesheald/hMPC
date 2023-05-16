@@ -5,9 +5,11 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, stabilise_variance, batch_calculate_theta, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
+from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
 from copy import copy
+import gym
+import warmup
 from brax import envs
 from brax.kinematics import forward
 from render import get_camera, create_gif, merge_gifs
@@ -135,19 +137,11 @@ def log_likelihood_diagonal_Gaussian(x_including_nans, mu, log_var):
 
 def loss_fn(params, state, actions, observations):
 
-    # # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    # mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
-
-    # # calculate the negative log probability of the sequence of observations
-    # loss = -log_likelihood_diagonal_Gaussian(observations[1:, :], mu + observations[0, None, :], log_var)
-
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    mu, log_var, _ = state.apply_fn(params, observations[0, [0, 1, 2, 3, 6, 7, 8, 9]], actions)
-
-    theta = batch_calculate_theta(observations)
+    mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
 
     # calculate the negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(np.concatenate((theta[1:, :], observations[1:, [6, 7, 8, 9]]), axis = 1) - np.concatenate((theta[0, :], observations[0, [6, 7, 8, 9]])), mu, log_var)
+    loss = -log_likelihood_diagonal_Gaussian(observations[1:, -3:] - observations[0, -3:], mu, log_var)
 
     return loss
 
@@ -190,67 +184,68 @@ def train_step(state, actions, observations, key, n_batches, chunk_length, time_
     
     return state, loss
 
-def random_action(controller, env, env_state, state, action_sequence_mean, key):
+def mpc_action(controller, env, state, action_sequence_mean, key):
 
-    action = random.uniform(key, shape = (env.action_size,), minval = -1.0, maxval = 1.0)
-
-    return action, action_sequence_mean
-
-def mpc_action(controller, env, env_state, state, action_sequence_mean, key):
-
-    action, action_sequence_mean = controller.get_action(env, env_state, state, action_sequence_mean, key)
+    action, action_sequence_mean = controller.get_action(env, env.env._get_obs(), state, action_sequence_mean, key)
 
     return action, action_sequence_mean
 
-def environment_step(env, controller, carry, key):
+def environment_step(env, controller, state, cumulative_reward, action_sequence_mean, key):
 
-    env_state, cumulative_reward, is_random_policy, state, action_sequence_mean = carry
+    action, action_sequence_mean = mpc_action(controller, env, state, action_sequence_mean, key)
 
-    action, action_sequence_mean = lax.cond(is_random_policy, partial(random_action, controller, env), partial(mpc_action, controller, env), env_state, state, action_sequence_mean, key)
+    _, reward, _, _ = env.step(action)
 
-    observation = np.copy(env_state.obs)
-
-    env_state = env.step(env_state, action)
-
-    next_observation = np.copy(env_state.obs)
+    next_observation = np.copy(env.env._get_obs())
     
-    cumulative_reward += env_state.reward
+    cumulative_reward += reward
 
-    carry = env_state, cumulative_reward, is_random_policy, state, action_sequence_mean
-    outputs = observation, action, next_observation
+    return cumulative_reward, action_sequence_mean, action, next_observation
 
-    return carry, outputs
+def perform_rollout(state, env, key, controller, time_steps, horizon):
 
-def perform_rollout(is_random_policy, state, env, key, controller, time_steps, horizon):
+    # randomly reset the environment
+    env_state = env.reset()
 
-    key, subkeys = keyGen(key, n_subkeys = 2)
-
-    # randomly reset the environment for each new rollout
-    env_state = env.reset(rng = next(subkeys))
+    # initial observation
+    initial_observation = np.copy(env.env._get_obs())
     
+    # initialise the cumulative reward
     cumulative_reward = 0
 
     # initialise the mean of the action sequence distribution
-    action_sequence_mean = np.zeros((horizon, env.action_size))
+    action_sequence_mean = np.zeros((horizon, env.action_space.shape[0]))
     
-    carry = env_state, cumulative_reward, is_random_policy, state, action_sequence_mean
+    key, subkeys = keyGen(key, n_subkeys = time_steps)
+    actions = np.empty((time_steps, env.action_space.shape[0]))
+    observations = np.empty((time_steps, env.observation_space.shape[0]))
+    for time in range(time_steps):
 
-    subkeys = random.split(next(subkeys), time_steps)
+        cumulative_reward, action_sequence_mean, action, observation = environment_step(env, controller, state, cumulative_reward, action_sequence_mean, next(subkeys))
 
-    (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
+        actions = actions.at[time,:].set(action)
+        observations = observations.at[time,:].set(observation)
 
-    outputs = action, np.vstack((observation[0,:], next_observation)), cumulative_reward
+    return actions, np.vstack((initial_observation, observations)), cumulative_reward
 
-    return outputs
+def collect_data(env, batch_perform_rollout, state, key, args):
 
-def collect_data(env, is_random_policy, batch_perform_rollout, state, key, args):
-
-    subkeys = random.split(key, args.n_rollouts)
-    actions, observations, cumulative_rewards = batch_perform_rollout(is_random_policy, state, env, subkeys)
+    key, subkeys = keyGen(key, n_subkeys = args.n_rollouts)
     
-    mean_cumulative_reward = cumulative_rewards.mean()
+    all_actions = np.empty((args.n_rollouts, args.time_steps, env.action_space.shape[0]))
+    all_observations = np.empty((args.n_rollouts, args.time_steps + 1, env.observation_space.shape[0]))
+    all_cumulative_rewards = np.empty((args.n_rollouts, args.time_steps))
+    for rollout in range(args.n_rollouts):
 
-    return actions, observations, mean_cumulative_reward
+        actions, observations, cumulative_rewards = batch_perform_rollout(state, env, next(subkeys))
+
+        all_actions = all_actions.at[rollout,:,:].set(actions)
+        all_observations = all_observations.at[rollout,:,:].set(observations)
+        all_cumulative_rewards = all_cumulative_rewards.at[rollout,:].set(cumulative_rewards)
+
+    mean_cumulative_reward = all_cumulative_rewards.mean()
+
+    return all_actions, all_observations, mean_cumulative_reward
 
 def pad_data(data, args, fill_value = np.nan):
 
@@ -266,8 +261,14 @@ def optimise_model(model, params, args, key):
     # create train state
     state, lr_scheduler = get_train_state(model, params, args)
 
-    # instantiate a brax environment
-    env = envs.create(env_name = args.environment_name)
+    # instantiate an environment
+    # env = envs.create(env_name = args.environment_name) # brax
+    env = gym.make(args.environment_name) # openai gym
+
+    # set the random seed of the environment # openai gym
+    key, subkeys = keyGen(key, n_subkeys = 1)
+    random_seed = int(random.randint(next(subkeys), (1,), 0, 1000000))
+    env.seed(random_seed)
 
     # set early stopping criteria
     early_stop = EarlyStopping(min_delta = args.min_delta, patience = args.patience)
@@ -277,33 +278,26 @@ def optimise_model(model, params, args, key):
 
     mppi = MPPI(env, args)
 
-    batch_perform_rollout = jit(vmap(partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon), in_axes = (None, None, None, 0)), static_argnums = (2,))
+    batch_perform_rollout = partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon)
 
     train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
 
     for iteration in range(args.n_model_iterations):
 
         # periodically evaluate the model
-        if iteration % args.eval_every == 0:
+        # if iteration % args.eval_every == 0:
 
-            evaluate_model(env, mppi, state, iteration, args)
+        #     evaluate_model(env, mppi, state, iteration, args)
+        print('evaluate model commented out temporarily')
 
         ###########################################
         ########## collect data ###################
         ###########################################
 
         # collect dataset
-        key, subkey = keyGen(key, n_subkeys = args.n_updates + 1)
+        key, subkeys = keyGen(key, n_subkeys = args.n_updates + 1)
 
-        if iteration == 0:
-
-            is_random_policy = True
-
-        else:
-
-            is_random_policy = False
-
-        actions, observations, mean_cumulative_reward = collect_data(env, is_random_policy, batch_perform_rollout, state, next(subkey), args)
+        actions, observations, mean_cumulative_reward = collect_data(env, batch_perform_rollout, state, next(subkeys), args)
 
         print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
 
@@ -329,7 +323,7 @@ def optimise_model(model, params, args, key):
         for update in range(args.n_updates):
 
             # perform a parameter update
-            state, loss = train_step_jit(state, all_actions, all_observations, next(subkey))
+            state, loss = train_step_jit(state, all_actions, all_observations, next(subkeys))
 
             # compute the average training loss
             training_loss = (training_loss * update + loss) / (update + 1)

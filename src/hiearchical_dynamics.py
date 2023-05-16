@@ -155,3 +155,5 @@ class hierarchical_dynamics_model(nn.Module):
 #                                     hidden_dim_dynamics_latent = 50, output_dim_dynamics_latent = 3)
 # params = model.init(state = np.ones(2), action = np.ones(2), key = random.PRNGKey(1), rngs = {'params': random.PRNGKey(1)})
 # output = model.apply(params, state = np.ones(2), action = np.ones(2), key = random.PRNGKey(1))
+# training input: x, a, x'
+# model output for training: rec
