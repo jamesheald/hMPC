@@ -52,9 +52,9 @@ class rollout_prediction(nn.Module):
 
         # calculate the expected cumulative reward under the predicted distribution of future observations
         # future observations are defined relative to the current observation
-        cumulative_reward = batch_expected_reward(action_sequence, mu + observation[-self.prediction_dim:], log_var).sum()
+        estimated_cumulative_reward = batch_expected_reward(action_sequence, mu + observation[-self.prediction_dim:], log_var).sum()
         
-        return mu, log_var, cumulative_reward
+        return mu, log_var, estimated_cumulative_reward
 
 def initialise_model(args):
 

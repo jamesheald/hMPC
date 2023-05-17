@@ -80,6 +80,7 @@ def main():
     parser.add_argument('--n_sequences',             type = int, default = 200) # 200
     parser.add_argument('--reward_weighting_factor', type = float, default = 1.0)
     parser.add_argument('--noise_std',               type = float, default = 0.1)
+    parser.add_argument('--ground_truth_dynamics',   type = bool, default = False)
 
     # optimisation
     parser.add_argument('--adam_b1',                 type = float, default = 0.9)

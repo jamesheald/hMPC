@@ -1,20 +1,22 @@
 from jax import value_and_grad, vmap, jit, random, lax
 from functools import partial
 import jax.numpy as np
+import numpy as onp
 import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
 from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
 import time
-from copy import copy
+from copy import deepcopy
 import gym
 import warmup
-from brax import envs
-from brax.kinematics import forward
-from render import get_camera, create_gif, merge_gifs
+from render import save_frames_as_gif
 import imageio
 import os
+
+from mujoco_py import GlfwContext
+GlfwContext(offscreen = True) # this is to avoid a GLEW initialization error when rendering using rgb_array mode (https://github.com/openai/mujoco-py/issues/390)
 
 def get_train_state(model, param, args):
     
@@ -33,79 +35,74 @@ def get_train_state(model, param, args):
 
 def render_rollout(env, controller, state, iteration, args, key, seed, render_prediction):
 
-    # jit environment, mpc policy and forward kinematics
-    jit_env_step = jit(env.step)
-    jit_mpc_action = jit(partial(mpc_action, controller, env))
-    jit_forward = jit(forward)
-
-    key, subkeys = keyGen(key, n_subkeys = args.time_steps + 1)
-
-    env_state = env.reset(rng = next(subkeys))
-    initial_observation = copy(env_state.obs)
-    pipeline_state = copy(env_state.pipeline_state)
+    # reset the environment
+    env.seed(seed)
+    initial_observation = np.copy(env.reset())
 
     # initialise the mean of the action sequence distribution
-    action_sequence_mean = np.zeros((args.horizon, env.action_size))
+    action_sequence_mean = np.zeros((args.horizon, env.action_space.shape[0]))
 
-    # perform rollout
-    rollout = []
-
-    actions = np.empty((args.time_steps, env.action_size))
+    # preallocate
+    frames = []
     cumulative_reward = 0
+    actions = np.empty((args.time_steps, env.action_space.shape[0]))
+
+    key, subkeys = keyGen(key, n_subkeys = args.time_steps)
     for time in range(args.time_steps):
 
-        # action, action_sequence_mean = random_action(controller, env, env_state, state, action_sequence_mean, next(subkeys))
-        action, action_sequence_mean = jit_mpc_action(env_state, state, action_sequence_mean, next(subkeys))
+        action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, next(subkeys))
+        
+        _, reward, _, _ = env.step(action)
 
+        frames.append(env.render(mode = "rgb_array"))
+        cumulative_reward += reward
         actions = actions.at[time, :].set(action)
-        env_state = jit_env_step(env_state, action)
-        cumulative_reward += env_state.reward
-        rollout.append(env_state.pipeline_state)
 
-    cameras = [get_camera()] * args.time_steps
-
-    # (_, cumulative_reward, _, _, _), (observation, action, next_observation) = lax.scan(partial(environment_step, env, controller), carry, subkeys)
-
-    # create and save a gif of the rollout
-    create_gif(env, rollout, cameras, 'runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif')
+    # save a gif of the rollout
+    path = 'runs/' + args.folder_name + '/'
+    rollout_filename = 'seed' + str(seed) + '_iteration' + str(iteration) + '.gif'
+    save_frames_as_gif(frames, path = path, filename = rollout_filename)
 
     if render_prediction:
 
-        # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-        mu, log_var, _ = state.apply_fn(state.params, initial_observation[np.array([0, 1, 2, 3, 6, 7, 8, 9])], actions)
+        print("you need to predict qpos, not just the end effector position, to render predictions; the current code qpos = mu[:2] is meaningless")
 
-        predicted_rollout = []
+        # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
+        mu, log_var, _ = state.apply_fn(state.params, initial_observation, actions)
+
+        predicted_frames = []
         for time in range(args.time_steps):
 
             if time == 0:
 
-                predicted_rollout.append(rollout[0])
+                predicted_frames.append(frames[0])
 
             else:
 
-                # pipeline_state = forward_kinematics(env, mu[time - 1,:], pipeline_state)
-                q = np.concatenate([mu[time - 1, :2], initial_observation[4:6]])
-                x, _ = jit_forward(env.sys, q, np.zeros(4,))
-                pipeline_state = pipeline_state.replace(x = x)
-                predicted_rollout.append(pipeline_state)
+                env.set_state(np.concatenate((mu[time - 1, :2], env.target[:2])), np.zeros(4,))
+                predicted_frames.append(env.render(mode = "rgb_array"))
 
-        # create and save a gif of the observation-based rollout
-        create_gif(env, predicted_rollout, cameras, 'predicted_rollout.gif')
+        # save a gif of the predicted rollout
+        predicted_rollout_filename = 'predicted_rollout.gif'
+        save_frames_as_gif(frames, path = path, filename = predicted_rollout_filename)
 
-        # merge both gifs into one (side-by-side)
-        gif1 = imageio.get_reader('runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '.gif')
-        gif2 = imageio.get_reader('predicted_rollout.gif')
-        merge_gifs(gif1, gif2, 'runs/' + args.folder_name + '/seed' + str(seed) + '_iteration' + str(iteration) + '_prediction' + '.gif', env.dt)
+        # horizontally stack the frames of the true and predicted rollouts
+        stacked_frames = [onp.hstack((i, j)) for i, j in zip(frames, predicted_frames)]
 
-        # delete original gif
-        os.remove('predicted_rollout.gif')
+        # save a gif showing the true (left) and predicted (right) rollouts side-by-side
+        stacked_gif_filename = 'seed' + str(seed) + '_iteration' + str(iteration) + '_prediction' + '.gif'
+        save_frames_as_gif(stacked_frames, path = path, filename = stacked_gif_filename)
+
+        # delete the original gifs
+        os.remove(path + rollout_filename)
+        os.remove(path + predicted_rollout_filename)
 
     return actions, cumulative_reward
 
 def evaluate_model(env, controller, state, iteration, args):
 
     cumulative_reward_list = []
-    for seed in range(1, args.n_eval_envs + 1):
+    for seed in range(3, args.n_eval_envs + 3):
 
         key = random.PRNGKey(seed)
 
@@ -184,51 +181,92 @@ def train_step(state, actions, observations, key, n_batches, chunk_length, time_
     
     return state, loss
 
-def mpc_action(controller, env, state, action_sequence_mean, key):
+def sample_candidate_action_sequences(controller, action_sequence_mean, key):
 
-    action, action_sequence_mean = controller.get_action(env, env.env._get_obs(), state, action_sequence_mean, key)
+    action_sequences = controller.sample_candidate_action_sequences(action_sequence_mean, key)
+
+    return action_sequences
+
+jit_sample_candidate_action_sequences = jit(sample_candidate_action_sequences, static_argnums = (0,))
+
+def estimate_cumulative_reward(state, observation, action_sequences):
+
+    _, _, estimated_cumulative_reward = state.apply_fn(state.params, observation, action_sequences)
+
+    return estimated_cumulative_reward
+
+jit_estimate_cumulative_reward = jit(vmap(estimate_cumulative_reward, in_axes = (None, None, 2)))
+
+def update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences):
+
+    action, action_sequence_mean = controller.update_action_sequence_mean(estimated_cumulative_reward, action_sequences)
 
     return action, action_sequence_mean
 
-def environment_step(env, controller, state, cumulative_reward, action_sequence_mean, key):
+jit_update_action_sequence_mean = jit(update_action_sequence_mean, static_argnums = (0,))
 
-    action, action_sequence_mean = mpc_action(controller, env, state, action_sequence_mean, key)
+def get_mpc_action(controller, state, env, action_sequence_mean, args, key):
+
+    action_sequences = jit_sample_candidate_action_sequences(controller, action_sequence_mean, key)
+
+    if args.ground_truth_dynamics:
+
+        estimated_cumulative_reward = np.zeros((action_sequences.shape[2]))
+        for rollout in range(action_sequences.shape[2]):
+
+            env_rollout = deepcopy(env)
+            for time in range(action_sequences.shape[0]):
+
+                _, reward, _, _ = env_rollout.step(action_sequences[time, :, rollout])
+
+                estimated_cumulative_reward = estimated_cumulative_reward.at[rollout].set(estimated_cumulative_reward[rollout] + reward)
+
+    else:
+
+        estimated_cumulative_reward = jit_estimate_cumulative_reward(state, env.env._get_obs(), action_sequences)
+
+    action, action_sequence_mean = jit_update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences)
+
+    return action, action_sequence_mean
+
+def environment_step(env, controller, state, action_sequence_mean, args, key):
+
+    action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, key)
 
     _, reward, _, _ = env.step(action)
 
     next_observation = np.copy(env.env._get_obs())
-    
-    cumulative_reward += reward
 
-    return cumulative_reward, action_sequence_mean, action, next_observation
+    return action, action_sequence_mean, next_observation, reward
 
-def perform_rollout(state, env, key, controller, time_steps, horizon):
+def perform_rollout(state, env, controller, args, key):
 
     # randomly reset the environment
     env_state = env.reset()
 
     # initial observation
     initial_observation = np.copy(env.env._get_obs())
-    
+
     # initialise the cumulative reward
     cumulative_reward = 0
 
     # initialise the mean of the action sequence distribution
-    action_sequence_mean = np.zeros((horizon, env.action_space.shape[0]))
+    action_sequence_mean = np.zeros((args.horizon, env.action_space.shape[0]))
     
-    key, subkeys = keyGen(key, n_subkeys = time_steps)
-    actions = np.empty((time_steps, env.action_space.shape[0]))
-    observations = np.empty((time_steps, env.observation_space.shape[0]))
-    for time in range(time_steps):
+    key, subkeys = keyGen(key, n_subkeys = args.time_steps)
+    actions = np.empty((args.time_steps, env.action_space.shape[0]))
+    observations = np.empty((args.time_steps, env.observation_space.shape[0]))
+    for time in range(args.time_steps):
 
-        cumulative_reward, action_sequence_mean, action, observation = environment_step(env, controller, state, cumulative_reward, action_sequence_mean, next(subkeys))
+        action, action_sequence_mean, observation, reward = environment_step(env, controller, state, action_sequence_mean, args, next(subkeys))
 
         actions = actions.at[time,:].set(action)
         observations = observations.at[time,:].set(observation)
+        cumulative_reward += reward
 
     return actions, np.vstack((initial_observation, observations)), cumulative_reward
 
-def collect_data(env, batch_perform_rollout, state, key, args):
+def collect_data(env, controller, state, key, args):
 
     key, subkeys = keyGen(key, n_subkeys = args.n_rollouts)
     
@@ -237,7 +275,7 @@ def collect_data(env, batch_perform_rollout, state, key, args):
     all_cumulative_rewards = np.empty((args.n_rollouts, args.time_steps))
     for rollout in range(args.n_rollouts):
 
-        actions, observations, cumulative_rewards = batch_perform_rollout(state, env, next(subkeys))
+        actions, observations, cumulative_rewards = perform_rollout(state, env, controller, args, next(subkeys))
 
         all_actions = all_actions.at[rollout,:,:].set(actions)
         all_observations = all_observations.at[rollout,:,:].set(observations)
@@ -278,17 +316,14 @@ def optimise_model(model, params, args, key):
 
     mppi = MPPI(env, args)
 
-    batch_perform_rollout = partial(perform_rollout, controller = mppi, time_steps = args.time_steps, horizon = args.horizon)
-
     train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
 
     for iteration in range(args.n_model_iterations):
 
         # periodically evaluate the model
-        # if iteration % args.eval_every == 0:
+        if iteration % args.eval_every == 0:
 
-        #     evaluate_model(env, mppi, state, iteration, args)
-        print('evaluate model commented out temporarily')
+            evaluate_model(env, mppi, state, iteration, args)
 
         ###########################################
         ########## collect data ###################
@@ -297,7 +332,9 @@ def optimise_model(model, params, args, key):
         # collect dataset
         key, subkeys = keyGen(key, n_subkeys = args.n_updates + 1)
 
-        actions, observations, mean_cumulative_reward = collect_data(env, batch_perform_rollout, state, next(subkeys), args)
+        data_start_time = time.time()
+        actions, observations, mean_cumulative_reward = collect_data(env, mppi, state, next(subkeys), args)
+        print("time =",time.time() - data_start_time)
 
         print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
 
@@ -353,7 +390,7 @@ def optimise_model(model, params, args, key):
                 #     # store losses
                 #     if batch == args.print_every:
                         
-                #         t_loss_through_training = copy(training_loss)
+                #         t_loss_through_training = deepcopy(training_loss)
                         
                 #     else:
                         

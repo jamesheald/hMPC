@@ -24,7 +24,6 @@ def expected_reward(action, mu, log_var):
 
 batch_expected_reward = vmap(expected_reward, in_axes = (0, 0, 0))
 
-
 # def _get_reward(self, ee_pos, action):
 #     lamb = 1e-4  # 1e-4
 #     epsilon = 1e-4
