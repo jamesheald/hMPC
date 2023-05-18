@@ -65,8 +65,6 @@ def render_rollout(env, controller, state, iteration, args, key, seed, render_pr
 
     if render_prediction:
 
-        print("you need to predict qpos, not just the end effector position, to render predictions; the current code qpos = mu[:2] is meaningless")
-
         # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
         mu, log_var, _ = state.apply_fn(state.params, initial_observation, actions)
 
@@ -135,10 +133,10 @@ def log_likelihood_diagonal_Gaussian(x_including_nans, mu, log_var):
 def loss_fn(params, state, actions, observations):
 
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
-    mu, log_var, _ = state.apply_fn(params, observations[0, :], actions)
+    mu, log_var, _ = state.apply_fn(params, observations[0,:], actions)
 
     # calculate the negative log probability of the sequence of observations
-    loss = -log_likelihood_diagonal_Gaussian(observations[1:, -3:] - observations[0, -3:], mu, log_var)
+    loss = -log_likelihood_diagonal_Gaussian(observations[1:,:] - observations[0,:], mu, log_var)
 
     return loss
 

@@ -1,24 +1,13 @@
 import jax.numpy as np
 from jax import vmap
-from utils import keyGen
 
-def reward_function(observation, action, next_observation):
+def expected_reward(action, mu, log_var, weight_state = 0.1, weight_action = 1e-4):
 
-    reward_dist = -np.linalg.norm(next_observation[8:]) ** 2 # original: -np.linalg.norm(next_observation[8:])
+    reward_state = - (mu @ mu + np.exp(log_var).sum()) / mu.size
 
-    reward_ctrl = -np.sum(action ** 2)
+    reward_action = - np.mean(action ** 2)
 
-    reward = 100 * reward_dist + 1 * reward_ctrl # 100 works better than 10 with norm ** 2; 10 works ok with norm
-
-    return reward
-
-def expected_reward(action, mu, log_var):
-
-    state_reward = -(mu @ mu + np.exp(log_var).sum()) # expectation not of norm (as in original reacher environment) but of norm ** 2
-
-    action_reward = -np.sum(action ** 2)
-
-    reward = 100 * state_reward + 1 * action_reward # 100 works better than 10 with norm ** 2; 10 works ok with norm
+    reward = weight_state * reward_state + weight_action * reward_action
 
     return reward
 

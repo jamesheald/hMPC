@@ -52,7 +52,7 @@ class rollout_prediction(nn.Module):
 
         # calculate the expected cumulative reward under the predicted distribution of future observations
         # future observations are defined relative to the current observation
-        estimated_cumulative_reward = batch_expected_reward(action_sequence, mu + observation[-self.prediction_dim:], log_var).sum()
+        estimated_cumulative_reward = batch_expected_reward(action_sequence, mu[:,-3:-1] + observation[-3:-1] - observation[-6:-4], log_var).sum()
         
         return mu, log_var, estimated_cumulative_reward
 
@@ -66,7 +66,7 @@ def initialise_model(args):
     
     # define the model and initialise its parameters
     env = gym.make(args.environment_name)
-    model = rollout_prediction(carry_dim = args.carry_dim, prediction_dim = 3, action_dim = env.action_space.shape[0])
+    model = rollout_prediction(carry_dim = args.carry_dim, prediction_dim = env.observation_space.shape[0], action_dim = env.action_space.shape[0])
     params = model.init(observation = np.ones(env.observation_space.shape[0]), action_sequence = np.ones((args.horizon, env.action_space.shape[0])), rngs = {'params': next(subkeys)})
 
     return model, params, args, key

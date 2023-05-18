@@ -12,12 +12,9 @@ import os
 # change GRU for transformer
 
 # save collected data so you can easily train GRUs/VAEs for testing ideas!!!
-# why do we need to use a random policy in first iteration (you don't need to in principal i don't think), is it just to save computational costs?
 
-# sort out reward in dynamics_model - currently expectation not of norm (as in original reacher environment) but of norm squared
 # sort of checkpoints/gif savinsg etc to monitor progress
-# check youre happy with args parameters
-# check clipping etc - maybe leave for now as worked fine with true dynamics model
+# check action clipping etc - maybe leave for now as worked fine with true dynamics model
 # could calculate dynamics loss on separate unseen validation dataset to monitor progress and decide when to stop (maybe less relevant as training dataset is growing?)
 
 # determine gradient clipping value by logging gradient norms during training and assessing
