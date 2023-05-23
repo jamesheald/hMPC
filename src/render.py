@@ -15,4 +15,6 @@ def save_frames_as_gif(frames, path, filename):
     
     anim.save(path + filename, writer = 'imagemagick', fps = 60)
 
+    plt.close()
+
     return None
