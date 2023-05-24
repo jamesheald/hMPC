@@ -3,7 +3,7 @@ from functools import partial
 import jax.numpy as np
 import numpy as onp
 import optax
-from controllers import MPPI
+from controllers import MPPI, CEM
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
 from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard, save_object_using_pickle
@@ -13,6 +13,7 @@ import gym
 import warmup
 from render import save_frames_as_gif
 import imageio
+import os
 
 from mujoco_py import GlfwContext
 GlfwContext(offscreen = True) # this is to avoid a GLEW initialization error when rendering using rgb_array mode (https://github.com/openai/mujoco-py/issues/390)
@@ -28,9 +29,25 @@ def get_train_state(model, param, args):
 
     if args.reload_state:
 
-        state = checkpoints.restore_checkpoint(ckpt_dir = 'runs/' + args.reload_folder_name, target = state)
+        state = checkpoints.restore_checkpoint(ckpt_dir = 'runs/' + args.reload_folder_name + '/checkpoint', target = state)
 
     return state, lr_scheduler
+
+def get_action_CEM(controller, action_sequence_mean, observation, state, key):
+
+    action, action_sequence_mean = controller.get_action(action_sequence_mean, observation, state, key)
+
+    return action, action_sequence_mean
+
+jit_get_action_CEM = jit(get_action_CEM, static_argnums = (0,))
+
+def get_action_MPPI(controller, action_sequence_mean, observation, state, key):
+
+    action, action_sequence_mean = controller.get_action(action_sequence_mean, observation, state, key)
+
+    return action, action_sequence_mean
+
+jit_get_action_MPPI = jit(get_action_MPPI, static_argnums = (0,))
 
 def render_rollout(env, controller, state, iteration, args, key, seed, render_prediction):
 
@@ -49,7 +66,14 @@ def render_rollout(env, controller, state, iteration, args, key, seed, render_pr
     key, subkeys = keyGen(key, n_subkeys = args.time_steps)
     for time in range(args.time_steps):
 
-        action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, next(subkeys))
+        if args.controller == 'MPPI':
+
+            action, action_sequence_mean = jit_get_action_MPPI(controller, action_sequence_mean, env.env._get_obs(), state, key)
+
+        elif args.controller == 'CEM':
+
+            action, action_sequence_mean = jit_get_action_CEM(controller, action_sequence_mean, env.env._get_obs(), state, key)
+        # action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, next(subkeys))
         
         _, reward, _, _ = env.step(action)
 
@@ -58,7 +82,7 @@ def render_rollout(env, controller, state, iteration, args, key, seed, render_pr
         actions = actions.at[time, :].set(action)
 
     # save a gif of the rollout
-    path = 'runs/' + args.folder_name + '/'
+    path = 'runs/' + args.folder_name + '/gifs/'
     rollout_filename = 'seed' + str(seed) + '_iteration' + str(iteration) + '.gif'
     save_frames_as_gif(frames, path = path, filename = rollout_filename)
 
@@ -99,7 +123,7 @@ def render_rollout(env, controller, state, iteration, args, key, seed, render_pr
 def evaluate_model(env, controller, state, iteration, args):
 
     cumulative_reward_list = []
-    for seed in range(3, args.n_eval_envs + 3):
+    for seed in range(args.n_envs_render):
 
         key = random.PRNGKey(seed)
 
@@ -178,57 +202,108 @@ def train_step(state, actions, observations, key, n_batches, chunk_length, time_
     
     return state, loss
 
-def sample_candidate_action_sequences(controller, action_sequence_mean, key):
+# def sample_candidate_action_sequences(controller, action_sequence_mean, key):
 
-    action_sequences = controller.sample_candidate_action_sequences(action_sequence_mean, key)
+#     action_sequences = controller.sample_candidate_action_sequences(action_sequence_mean, key)
 
-    return action_sequences
+#     return action_sequences
 
-jit_sample_candidate_action_sequences = jit(sample_candidate_action_sequences, static_argnums = (0,))
+# jit_sample_candidate_action_sequences = jit(sample_candidate_action_sequences, static_argnums = (0,))
 
-def estimate_cumulative_reward(state, observation, action_sequences):
+# def sample_candidate_action_sequences(controller, action_sequence_mean, action_sequence_variance, key):
 
-    _, _, estimated_cumulative_reward = state.apply_fn(state.params, observation, action_sequences)
+#     action_sequences = controller.sample_candidate_action_sequences(action_sequence_mean, action_sequence_variance, key)
 
-    return estimated_cumulative_reward
+#     return action_sequences
 
-jit_estimate_cumulative_reward = jit(vmap(estimate_cumulative_reward, in_axes = (None, None, 2)))
+# jit_sample_candidate_action_sequences = jit(sample_candidate_action_sequences, static_argnums = (0,))
 
-def update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences):
+# def estimate_cumulative_reward(state, observation, action_sequences):
 
-    action, action_sequence_mean = controller.update_action_sequence_mean(estimated_cumulative_reward, action_sequences)
+#     _, _, estimated_cumulative_reward = state.apply_fn(state.params, observation, action_sequences)
 
-    return action, action_sequence_mean
+#     return estimated_cumulative_reward
 
-jit_update_action_sequence_mean = jit(update_action_sequence_mean, static_argnums = (0,))
+# jit_estimate_cumulative_reward = jit(vmap(estimate_cumulative_reward, in_axes = (None, None, 2)))
 
-def get_mpc_action(controller, state, env, action_sequence_mean, args, key):
+# def update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences):
 
-    action_sequences = jit_sample_candidate_action_sequences(controller, action_sequence_mean, key)
+#     action, action_sequence_mean = controller.update_action_sequence_mean(estimated_cumulative_reward, action_sequences)
 
-    if args.ground_truth_dynamics:
+#     return action, action_sequence_mean
 
-        estimated_cumulative_reward = np.zeros((action_sequences.shape[2]))
-        for rollout in range(action_sequences.shape[2]):
+# jit_update_action_sequence_mean = jit(update_action_sequence_mean, static_argnums = (0,))
 
-            env_rollout = deepcopy(env)
-            for time in range(action_sequences.shape[0]):
+# def get_mpc_action(controller, state, env, action_sequence_mean, args, key): # MPPI with ground truth option
 
-                _, reward, _, _ = env_rollout.step(action_sequences[time, :, rollout])
+#     action_sequences = jit_sample_candidate_action_sequences(controller, action_sequence_mean, key)
 
-                estimated_cumulative_reward = estimated_cumulative_reward.at[rollout].set(estimated_cumulative_reward[rollout] + reward)
+#     if args.ground_truth_dynamics:
 
-    else:
+#         estimated_cumulative_reward = np.zeros((action_sequences.shape[2]))
+#         for rollout in range(action_sequences.shape[2]):
 
-        estimated_cumulative_reward = jit_estimate_cumulative_reward(state, env.env._get_obs(), action_sequences)
+#             env_rollout = deepcopy(env)
+#             for time in range(action_sequences.shape[0]):
 
-    action, action_sequence_mean = jit_update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences)
+#                 _, reward, _, _ = env_rollout.step(action_sequences[time, :, rollout])
 
-    return action, action_sequence_mean
+#                 estimated_cumulative_reward = estimated_cumulative_reward.at[rollout].set(estimated_cumulative_reward[rollout] + reward)
+
+#     else:
+
+#         estimated_cumulative_reward = jit_estimate_cumulative_reward(state, env.env._get_obs(), action_sequences)
+
+#     action, action_sequence_mean = jit_update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences)
+
+#     return action, action_sequence_mean
+
+# def get_mpc_action(controller, state, env, action_sequence_mean, args, key): # CEM with ground truth option
+
+#     action_sequence_variance = np.ones((args.horizon, env.action_space.shape[0])) * 0.1 ** 2
+
+#     for i in range(args.CEM_iterations):
+
+#         action_sequences = jit_sample_candidate_action_sequences(controller, action_sequence_mean, action_sequence_variance, key)
+
+#         if args.ground_truth_dynamics:
+
+#             estimated_cumulative_reward = np.zeros((action_sequences.shape[2]))
+#             for rollout in range(action_sequences.shape[2]):
+
+#                 env_rollout = deepcopy(env)
+#                 for time in range(action_sequences.shape[0]):
+
+#                     _, reward, _, _ = env_rollout.step(action_sequences[time, :, rollout])
+
+#                     estimated_cumulative_reward = estimated_cumulative_reward.at[rollout].set(estimated_cumulative_reward[rollout] + reward)
+
+#         else:
+
+#             estimated_cumulative_reward = jit_estimate_cumulative_reward(state, env.env._get_obs(), action_sequences)
+
+#         action_sequence_mean, action_sequence_variance = jit_update_action_sequence_mean(controller, estimated_cumulative_reward, action_sequences)
+
+#     action = np.copy(action_sequence_mean[0, :])
+
+#     # warmstarting (reuse the plan from the previous planning step)
+#     # amortise the optimisation process across multiple planning steps
+#     # shift the mean of the action sequence distribution by one time point
+#     # this implicitly copies/repeats the last time point (alternatively it could be set to 0)
+#     action_sequence_mean = action_sequence_mean.at[:-1, :].set(action_sequence_mean[1:, :])
+
+#     return action, action_sequence_mean
 
 def environment_step(env, controller, state, action_sequence_mean, args, key):
 
-    action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, key)
+    # action, action_sequence_mean = get_mpc_action(controller, state, env, action_sequence_mean, args, key)
+    if args.controller == 'MPPI':
+
+        action, action_sequence_mean = jit_get_action_MPPI(controller, action_sequence_mean, env.env._get_obs(), state, key)
+
+    elif args.controller == 'CEM':
+
+        action, action_sequence_mean = jit_get_action_CEM(controller, action_sequence_mean, env.env._get_obs(), state, key)
 
     _, reward, _, _ = env.step(action)
 
@@ -310,17 +385,23 @@ def optimise_model(model, params, args, key):
 
     # create tensorboard writer
     writer = create_tensorboard_writer(args)
+    
+    if args.controller == 'MPPI':
 
-    mppi = MPPI(env, args)
+        controller = MPPI(env, args)
+
+    elif args.controller == 'CEM':
+
+        controller = CEM(env, args)
 
     train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
 
     for iteration in range(args.n_model_iterations):
 
         # periodically evaluate the model
-        if iteration % args.eval_every == 0:
+        if iteration % args.render_every == 0:
 
-            evaluate_model(env, mppi, state, iteration, args)
+            evaluate_model(env, controller, state, iteration, args)
 
         ###########################################
         ########## collect data ###################
@@ -330,8 +411,8 @@ def optimise_model(model, params, args, key):
         key, subkeys = keyGen(key, n_subkeys = args.n_updates + 1)
 
         data_start_time = time.time()
-        actions, observations, mean_cumulative_reward = collect_data(env, mppi, state, next(subkeys), args)
-        print("time =",time.time() - data_start_time)
+        actions, observations, mean_cumulative_reward = collect_data(env, controller, state, next(subkeys), args)
+        print("time collecting data =",time.time() - data_start_time)
 
         print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
 
@@ -399,8 +480,7 @@ def optimise_model(model, params, args, key):
 
         if iteration % args.save_trajectories_every == 0:
 
-            save_object_using_pickle(all_actions, path = 'runs/' + args.folder_name + '/', filename = 'all_actions')
-            save_object_using_pickle(all_observations, path = 'runs/' + args.folder_name + '/', filename = 'all_observations')
+            save_object_using_pickle({'actions': all_actions, 'observations': all_observations}, path = 'runs/' + args.folder_name + '/trajectory_data/', filename = 'iteration_' + str(iteration))
 
         if iteration % args.checkpoint_every == 0:
 
@@ -431,9 +511,6 @@ def optimise_model(model, params, args, key):
                 #     print('Early stopping criteria met, breaking...')
                     
                 #     break
-
-        # render a rollout and save a gif
-        # render_rollout(env, mppi, state, iteration, args, next(subkey))
 
     optimisation_duration = time.time() - optimisation_start_time
 

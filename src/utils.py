@@ -40,7 +40,7 @@ def create_tensorboard_writer(args):
 
     # create a tensorboard writer
     # to view tensorboard results, call 'tensorboard --logdir=.' in runs folder from terminal
-    writer = tensorboard.SummaryWriter('runs/' + args.folder_name)
+    writer = tensorboard.SummaryWriter('runs/' + args.folder_name + '/tensorboard_log')
 
     return writer
 
@@ -59,7 +59,7 @@ def save_object_using_pickle(obj, path, filename):
 def load_object_using_pickle(path, filename):
 
 	with open(path + filename, 'rb') as file:
-		
+
 		obj = pickle.load(file)
 
 	return obj

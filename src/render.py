@@ -1,5 +1,6 @@
 from matplotlib import animation
 import matplotlib.pyplot as plt
+import os
 
 def save_frames_as_gif(frames, path, filename):
 
@@ -13,6 +14,7 @@ def save_frames_as_gif(frames, path, filename):
     
     anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval = 50)
     
+    os.makedirs(os.path.dirname(path), exist_ok = True)
     anim.save(path + filename, writer = 'imagemagick', fps = 60)
 
     plt.close()

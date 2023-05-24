@@ -7,8 +7,10 @@ import os
 # softmax temperature
 # action noise magnitude
 
-# things to do
+# TO DO:
 
+# increase variance of targets across environment resets
+# for CEM, warmstart variance too?
 # change GRU for transformer
 
 # save collected data so you can easily train GRUs/VAEs for testing ideas!!!
@@ -53,11 +55,9 @@ def main():
     parser.add_argument('--carry_dim',                  type = int, default = 200)
 
     # gym environment
-    # https://www.gymlibrary.dev/environments/mujoco/reacher/
-    # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
     parser.add_argument('--environment_name',           default = 'muscle_arm-v0')
     parser.add_argument('--n_rollouts',                 type = int, default = 5) # 30
-    parser.add_argument('--time_steps',                 type = int, default = 50) # 50, 1000 
+    parser.add_argument('--time_steps',                 type = int, default = 50)
 
     # # muscle_arm-v0 observations
     # env.sim.data.qpos[: env.nq],
@@ -68,17 +68,21 @@ def main():
     # env.muscle_activity(),
     # env.target,
     # env.sim.data.get_site_xpos(env.tracking_str)
-    
-    # model evluation
-    parser.add_argument('--eval_every',                 type = int, default = 10) # 10
-    parser.add_argument('--n_eval_envs',                type = int, default = 2) # 50, 1000
 
-    # MPPI
+    # MPC variables common to all MPC algorithms
+    parser.add_argument('--controller',                 default = 'CEM') # 'MPPI' or 'CEM'
     parser.add_argument('--horizon',                    type = int, default = 50) # 7
-    parser.add_argument('--n_sequences',                type = int, default = 200) # 200
-    parser.add_argument('--reward_weighting_factor',    type = float, default = 10000) # 1.0
-    parser.add_argument('--noise_std',                  type = float, default = 0.1)
+    parser.add_argument('--n_sequences',                type = int, default = 200)
     parser.add_argument('--ground_truth_dynamics',      type = bool, default = False)
+    
+    # MPPI
+    parser.add_argument('--reward_weighting_factor',    type = float, default = 100) # 1.0
+    parser.add_argument('--noise_std_MPPI',             type = float, default = 0.1)
+
+    # CEM
+    parser.add_argument('--n_elite',                    type = int, default = 10)
+    parser.add_argument('--CEM_iterations',             type = int, default = 3)
+    parser.add_argument('--noise_std_CEM',              type = float, default = 0.1)
 
     # optimisation
     parser.add_argument('--adam_b1',                    type = float, default = 0.9)
@@ -90,14 +94,18 @@ def main():
     parser.add_argument('--decay_steps',                type = int, default = 1)
     parser.add_argument('--decay_factor',               type = float, default = 1) # 0.9999 (1 is constant learning rate)
     parser.add_argument('--n_model_iterations',         type = int, default = 1000)
-    parser.add_argument('--n_batches',                  type = int, default = 50) # 50, 30
-    parser.add_argument('--chunk_length',               type = int, default = 50) # 50, shouldn't this be equal to planning horizon?
+    parser.add_argument('--n_batches',                  type = int, default = 50)
+    parser.add_argument('--chunk_length',               type = int, default = 50) # shouldn't this be equal to planning horizon?
     parser.add_argument('--n_updates',                  type = int, default = 100)
     parser.add_argument('--min_delta',                  type = float, default = 1e-3)
     parser.add_argument('--patience',                   type = int, default = 2)
+    
+    # do stuff every n model iterations
     parser.add_argument('--print_every',                type = int, default = 50)
     parser.add_argument('--save_trajectories_every',    type = int, default = 25)
     parser.add_argument('--checkpoint_every',           type = int, default = 25)
+    parser.add_argument('--render_every',               type = int, default = 10)
+    parser.add_argument('--n_envs_render',              type = int, default = 2)
 
     args = parser.parse_args()
 
@@ -112,10 +120,10 @@ def main():
     # be open minded about the choice of the scaling factor (and bias) on pen_state
     # i don't bound fingertip prediction, as should be on scale of 1 and centered on zero
 
-    # to change an argument via the command line: python main.py --reload_folder_name 'run_1' --reload_state True
+    # to change an argument via the command line: python main.py --reload_folder_name '100its' --reload_state True
 
     # save the hyperparameters
-    save_object_using_pickle(args, path = 'runs/' + args.folder_name + '/', filename = 'hyperparameters')
+    save_object_using_pickle(args, path = 'runs/' + args.folder_name + '/hyperparameters/', filename = 'hyperparameters')
 
     # from jax.config import config
     # config.update("jax_disable_jit", True)
