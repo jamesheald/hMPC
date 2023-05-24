@@ -6,14 +6,13 @@ import optax
 from controllers import MPPI
 from flax.training import checkpoints, train_state
 from flax.training.early_stopping import EarlyStopping
-from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard
+from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard, save_object_using_pickle
 import time
 from copy import deepcopy
 import gym
 import warmup
 from render import save_frames_as_gif
 import imageio
-import os
 
 from mujoco_py import GlfwContext
 GlfwContext(offscreen = True) # this is to avoid a GLEW initialization error when rendering using rgb_array mode (https://github.com/openai/mujoco-py/issues/390)
@@ -398,10 +397,15 @@ def optimise_model(model, params, args, key):
                 #     training_loss = 0
                 #     batch_start_time = time.time()
 
-        if iteration % 100 == 0:
+        if iteration % args.save_trajectories_every == 0:
+
+            save_object_using_pickle(all_actions, path = 'runs/' + args.folder_name + '/', filename = 'all_actions')
+            save_object_using_pickle(all_observations, path = 'runs/' + args.folder_name + '/', filename = 'all_observations')
+
+        if iteration % args.checkpoint_every == 0:
 
             # save checkpoint
-            checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name, target = state, step = iteration)
+            checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name + '/checkpoint', target = state, step = iteration)
 
             # if epoch % 50 == 0:
 

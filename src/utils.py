@@ -1,6 +1,8 @@
 from jax import random
 import jax.numpy as np
 from flax.metrics import tensorboard
+import pickle
+import os
 
 def keyGen(key, n_subkeys):
 	
@@ -46,3 +48,18 @@ def write_metrics_to_tensorboard(writer, t_losses, v_losses, epoch):
 
 	writer.scalar('GRU loss (train)', t_losses['total'].mean(), epoch)
 	writer.flush()
+
+def save_object_using_pickle(obj, path, filename):
+
+	os.makedirs(os.path.dirname(path), exist_ok = True)
+	with open(path + filename, 'wb') as file:
+
+		pickle.dump(obj, file)
+
+def load_object_using_pickle(path, filename):
+
+	with open(path + filename, 'rb') as file:
+		
+		obj = pickle.load(file)
+
+	return obj

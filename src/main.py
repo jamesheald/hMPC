@@ -36,6 +36,7 @@ os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 from initialise import initialise_model
 from train import optimise_model
+from utils import save_object_using_pickle
 # from assess_model_learning import optimise_model
 
 def main():
@@ -43,20 +44,20 @@ def main():
     parser = argparse.ArgumentParser(description = 'hyperparameters')
 
     # directories
-    parser.add_argument('--folder_name',             default = 'to_save_model')
-    parser.add_argument('--reload_state',            type = bool, default = False)
-    parser.add_argument('--reload_folder_name',      default = 'saved_model')
+    parser.add_argument('--folder_name',                default = 'to_save_model')
+    parser.add_argument('--reload_state',               type = bool, default = False)
+    parser.add_argument('--reload_folder_name',         default = 'saved_model')
 
     # model
-    parser.add_argument('--jax_seed',                type = int, default = 1)
-    parser.add_argument('--carry_dim',               type = int, default = 200)
+    parser.add_argument('--jax_seed',                   type = int, default = 1)
+    parser.add_argument('--carry_dim',                  type = int, default = 200)
 
     # gym environment
     # https://www.gymlibrary.dev/environments/mujoco/reacher/
     # ['ant', 'halfcheetah', 'hopper', 'humanoid', 'humanoidstandup', 'inverted_pendulum', 'inverted_double_pendulum', 'pusher', 'reacher', 'walker2d']
-    parser.add_argument('--environment_name',        default = 'muscle_arm-v0')
-    parser.add_argument('--n_rollouts',              type = int, default = 5) # 30
-    parser.add_argument('--time_steps',              type = int, default = 50) # 50, 1000 
+    parser.add_argument('--environment_name',           default = 'muscle_arm-v0')
+    parser.add_argument('--n_rollouts',                 type = int, default = 5) # 30
+    parser.add_argument('--time_steps',                 type = int, default = 50) # 50, 1000 
 
     # # muscle_arm-v0 observations
     # env.sim.data.qpos[: env.nq],
@@ -69,32 +70,34 @@ def main():
     # env.sim.data.get_site_xpos(env.tracking_str)
     
     # model evluation
-    parser.add_argument('--eval_every',              type = int, default = 10) # 10
-    parser.add_argument('--n_eval_envs',             type = int, default = 2) # 50, 1000
+    parser.add_argument('--eval_every',                 type = int, default = 10) # 10
+    parser.add_argument('--n_eval_envs',                type = int, default = 2) # 50, 1000
 
     # MPPI
-    parser.add_argument('--horizon',                 type = int, default = 50) # 7
-    parser.add_argument('--n_sequences',             type = int, default = 200) # 200
-    parser.add_argument('--reward_weighting_factor', type = float, default = 10000) # 1.0
-    parser.add_argument('--noise_std',               type = float, default = 0.1)
-    parser.add_argument('--ground_truth_dynamics',   type = bool, default = False)
+    parser.add_argument('--horizon',                    type = int, default = 50) # 7
+    parser.add_argument('--n_sequences',                type = int, default = 200) # 200
+    parser.add_argument('--reward_weighting_factor',    type = float, default = 10000) # 1.0
+    parser.add_argument('--noise_std',                  type = float, default = 0.1)
+    parser.add_argument('--ground_truth_dynamics',      type = bool, default = False)
 
     # optimisation
-    parser.add_argument('--adam_b1',                 type = float, default = 0.9)
-    parser.add_argument('--adam_b2',                 type = float, default = 0.999)
-    parser.add_argument('--adam_eps',                type = float, default = 1e-8)
-    parser.add_argument('--weight_decay',            type = float, default = 0) # 0.0001 (0 is adam not adamw)
-    parser.add_argument('--max_grad_norm',           type = float, default = 10.0)
-    parser.add_argument('--step_size',               type = float, default = 0.001)
-    parser.add_argument('--decay_steps',             type = int, default = 1)
-    parser.add_argument('--decay_factor',            type = float, default = 1) # 0.9999 (1 is constant learning rate)
-    parser.add_argument('--print_every',             type = int, default = 50)
-    parser.add_argument('--n_model_iterations',      type = int, default = 1000)
-    parser.add_argument('--n_batches',               type = int, default = 50) # 50, 30
-    parser.add_argument('--chunk_length',            type = int, default = 50) # 50, shouldn't this be equal to planning horizon?
-    parser.add_argument('--n_updates',               type = int, default = 100)
-    parser.add_argument('--min_delta',               type = float, default = 1e-3)
-    parser.add_argument('--patience',                type = int, default = 2)
+    parser.add_argument('--adam_b1',                    type = float, default = 0.9)
+    parser.add_argument('--adam_b2',                    type = float, default = 0.999)
+    parser.add_argument('--adam_eps',                   type = float, default = 1e-8)
+    parser.add_argument('--weight_decay',               type = float, default = 0) # 0.0001 (0 is adam not adamw)
+    parser.add_argument('--max_grad_norm',              type = float, default = 10.0)
+    parser.add_argument('--step_size',                  type = float, default = 0.001)
+    parser.add_argument('--decay_steps',                type = int, default = 1)
+    parser.add_argument('--decay_factor',               type = float, default = 1) # 0.9999 (1 is constant learning rate)
+    parser.add_argument('--n_model_iterations',         type = int, default = 1000)
+    parser.add_argument('--n_batches',                  type = int, default = 50) # 50, 30
+    parser.add_argument('--chunk_length',               type = int, default = 50) # 50, shouldn't this be equal to planning horizon?
+    parser.add_argument('--n_updates',                  type = int, default = 100)
+    parser.add_argument('--min_delta',                  type = float, default = 1e-3)
+    parser.add_argument('--patience',                   type = int, default = 2)
+    parser.add_argument('--print_every',                type = int, default = 50)
+    parser.add_argument('--save_trajectories_every',    type = int, default = 25)
+    parser.add_argument('--checkpoint_every',           type = int, default = 25)
 
     args = parser.parse_args()
 
@@ -112,11 +115,7 @@ def main():
     # to change an argument via the command line: python main.py --reload_folder_name 'run_1' --reload_state True
 
     # save the hyperparameters
-    path = 'runs/' + args.folder_name + '/hyperparameters'
-    os.makedirs(os.path.dirname(path))
-    file = open(path, 'wb') # change 'wb' to 'rb' to load
-    pickle.dump(args, file) # change to args = pickle.load(file) to load
-    file.close()
+    save_object_using_pickle(args, path = 'runs/' + args.folder_name + '/', filename = 'hyperparameters')
 
     # from jax.config import config
     # config.update("jax_disable_jit", True)
