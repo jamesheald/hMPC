@@ -8,6 +8,8 @@ class MPPI:
 
         self.horizon = args.horizon
         self.n_actions = env.action_space.shape[0]
+        self.actions_lower_bounds = env.action_space.low
+        self.actions_upper_bounds = env.action_space.high
         self.n_sequences = args.n_sequences
         self.reward_weighting_factor = args.reward_weighting_factor
         self.noise_std = args.noise_std
@@ -18,8 +20,8 @@ class MPPI:
         action_sequence_mean = np.repeat(action_sequence_mean[:, :, None], self.n_sequences, axis = 2)
 
         # sample noise from a truncated normal distribution
-        lower = (-1 - action_sequence_mean) / self.noise_std
-        upper = (1 - action_sequence_mean) / self.noise_std
+        lower = (self.actions_lower_bounds[None, :, None] - action_sequence_mean) / self.noise_std
+        upper = (self.actions_upper_bounds[None, :, None] - action_sequence_mean) / self.noise_std
         eps = random.truncated_normal(key, lower = lower, upper = upper, shape = (self.horizon, self.n_actions, self.n_sequences)) * self.noise_std
 
         action_sequences = action_sequence_mean + eps
