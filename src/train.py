@@ -4,7 +4,8 @@ import jax.numpy as np
 import numpy as onp
 import optax
 from controllers import MPPI, CEM
-from flax.training import checkpoints, train_state
+from flax.training import train_state
+from orbax.checkpoint import Checkpointer, PyTreeCheckpointHandler
 from flax.training.early_stopping import EarlyStopping
 from utils import keyGen, stabilise_variance, print_metrics, create_tensorboard_writer, write_metrics_to_tensorboard, save_object_using_pickle
 import time
@@ -15,23 +16,32 @@ from render import save_frames_as_gif
 import imageio
 import os
 
-from mujoco_py import GlfwContext
-GlfwContext(offscreen = True) # this is to avoid a GLEW initialization error when rendering using rgb_array mode (https://github.com/openai/mujoco-py/issues/390)
+# from mujoco_py import GlfwContext
+# GlfwContext(offscreen = True) # this is to avoid a GLEW initialization error when rendering using rgb_array mode (https://github.com/openai/mujoco-py/issues/390)
 
-def get_train_state(model, param, args):
-    
+def get_train_states(models, params, args, ckptr):
+
     lr_scheduler = optax.exponential_decay(args.step_size, args.decay_steps, args.decay_factor)
 
     optimiser = optax.chain(optax.adamw(learning_rate = lr_scheduler, b1 = args.adam_b1, b2 = args.adam_b2, eps = args.adam_eps, 
                             weight_decay = args.weight_decay), optax.clip_by_global_norm(args.max_grad_norm))
-    
-    state = train_state.TrainState.create(apply_fn = model.apply, params = param, tx = optimiser)
 
-    if args.reload_state:
+    states = []
+    for i, (model, param) in enumerate(zip(models, params)):
+        
+        states.append(train_state.TrainState.create(apply_fn = model.apply, params = param, tx = optimiser))
 
-        state = checkpoints.restore_checkpoint(ckpt_dir = 'runs/' + args.reload_folder_name + '/checkpoint', target = state)
+        if args.reload_state:
 
-    return state, lr_scheduler
+            if i == 0:
+
+                states.append(ckptr.restore('runs/' + args.reload_folder_name + '/checkpoints/dynamics_model', states[0]))
+
+            elif i == 1:
+
+                states.append(ckptr.restore('runs/' + args.reload_folder_name + '/checkpoints/VAE', states[1]))
+
+    return states, lr_scheduler
 
 def get_action_CEM(controller, action_sequence_mean, observation, state, key):
 
@@ -133,8 +143,6 @@ def evaluate_model(env, controller, state, iteration, args):
 
     print("cumulative_reward_list:", cumulative_reward_list)
 
-    return None
-
 def log_likelihood_diagonal_Gaussian(x_including_nans, mu, log_var):
     """
     Calculate the log likelihood of x under a diagonal Gaussian distribution
@@ -153,7 +161,7 @@ def log_likelihood_diagonal_Gaussian(x_including_nans, mu, log_var):
     
     return np.sum(log_likelihood)
 
-def loss_fn(params, state, actions, observations):
+def dynamics_loss_fn(params, state, actions, observations):
 
     # use the learned dynamics model to predict the sequence of observations given the initial observation and the sequence of actions
     mu, log_var, _ = state.apply_fn(params, observations[0,:], actions)
@@ -163,15 +171,15 @@ def loss_fn(params, state, actions, observations):
 
     return loss
 
-batch_loss_fn = vmap(loss_fn, in_axes = (None, None, 0, 0))
+dynamics_batch_loss_fn = vmap(dynamics_loss_fn, in_axes = (None, None, 0, 0))
 
-def loss(params, state, actions, observations):
+def dynamics_loss(params, state, actions, observations):
 
-    batch_loss = batch_loss_fn(params, state, actions, observations).mean()
+    batch_loss = dynamics_batch_loss_fn(params, state, actions, observations).mean()
 
     return batch_loss
 
-loss_grad = value_and_grad(loss)
+dynamics_loss_grad = value_and_grad(dynamics_loss)
 
 def sample_sequence_chunk(actions, observations, chunk_length, time_steps, key):
 
@@ -190,13 +198,83 @@ def sample_sequence_chunk(actions, observations, chunk_length, time_steps, key):
 
 batch_sample_sequence_chunk = vmap(sample_sequence_chunk, in_axes = (None, None, None, None, 0))
 
-def train_step(state, actions, observations, key, n_batches, chunk_length, time_steps):
+def dynamics_train_step(state, actions, observations, key, n_batches, chunk_length, time_steps):
 
     subkeys = random.split(key, n_batches)
 
     sampled_actions, sampled_observations = batch_sample_sequence_chunk(actions, observations, chunk_length, time_steps, subkeys)
     
-    loss, grads = loss_grad(state.params, state, sampled_actions, sampled_observations)
+    loss, grads = dynamics_loss_grad(state.params, state, sampled_actions, sampled_observations)
+
+    state = state.apply_gradients(grads = grads)
+    
+    return state, loss
+
+def KL_diagonal_Gaussians(mu_1, log_var_1, mu_0, log_var_0):
+        """
+        KL(q||p), where q is posterior and p is prior
+        mu_1, log_var_1 is the mean and log variances of the posterior
+        mu_0, log_var_0 is the mean and log variances of the prior
+        var_min is added to the variances for numerical stability
+        """
+        log_var_0 = stabilise_variance(log_var_0)
+        log_var_1 = stabilise_variance(log_var_1)
+
+        return np.sum(0.5 * (log_var_0 - log_var_1 + np.exp(log_var_1 - log_var_0) 
+                             - 1.0 + (mu_1 - mu_0)**2 / np.exp(log_var_0)))
+
+def VAE_loss_fn(params, state, action, key):
+
+    # pass the action through the VAE to obtain the encoder and decoder distributions
+    p = state.apply_fn({'params': params['params']}, action, key)
+
+    # kl divergence between the approximate posterior and the prior
+    mu_0 = 0
+    log_var_0 = params['prior_z_log_var']
+    kl = KL_diagonal_Gaussians(p['p_z']['mean'], p['p_z']['log_var'], mu_0, log_var_0)
+
+    # calculate the negative log likelihood of the action
+    nll = -log_likelihood_diagonal_Gaussian(action, p['p_a']['mean'], p['p_a']['log_var'])
+
+    loss = kl + nll
+
+    return loss
+
+VAE_batch_loss_fn = vmap(VAE_loss_fn, in_axes = (None, None, 0, 0))
+
+def VAE_loss(params, state, actions, subkeys):
+
+    batch_loss = VAE_batch_loss_fn(params, state, actions, subkeys).mean()
+
+    return batch_loss
+
+VAE_loss_grad = value_and_grad(VAE_loss)
+
+def sample_action(actions, key):
+
+    key, subkeys = keyGen(key, n_subkeys = 2)
+
+    # sample an episode
+    e = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = actions.shape[0])
+
+    # sample a time step
+    t = random.randint(next(subkeys), shape = (1,), minval = 0, maxval = actions.shape[1])
+
+    sampled_action = lax.dynamic_slice(actions, (e[0], t[0], 0), (1, 1, actions.shape[2]))[0, 0, :]
+
+    return sampled_action
+
+batch_sample_action = vmap(sample_action, in_axes = (None, 0))
+
+def VAE_train_step(state, actions, key, n_batches):
+
+    subkeys = random.split(key, n_batches)
+
+    sampled_actions = batch_sample_action(actions, subkeys)
+
+    subkeys = random.split(key, n_batches)
+    
+    loss, grads = VAE_loss_grad(state.params, state, sampled_actions, subkeys)
 
     state = state.apply_gradients(grads = grads)
     
@@ -363,16 +441,18 @@ def pad_data(data, args, fill_value = np.nan):
 
     return padded_data
 
-def optimise_model(model, params, args, key):
+def optimise_model(models, params, args, key):
 
     # start optimisation timer
     optimisation_start_time = time.time()
+
+    # create a checkpoint object for saving and restoring checkpoints
+    ckptr = Checkpointer(PyTreeCheckpointHandler())
     
     # create train state
-    state, lr_scheduler = get_train_state(model, params, args)
+    states, lr_scheduler = get_train_states(models, params, args, ckptr)
 
     # instantiate an environment
-    # env = envs.create(env_name = args.environment_name) # brax
     env = gym.make(args.environment_name) # openai gym
 
     # set the random seed of the environment # openai gym
@@ -385,7 +465,7 @@ def optimise_model(model, params, args, key):
 
     # create tensorboard writer
     writer = create_tensorboard_writer(args)
-    
+
     if args.controller == 'MPPI':
 
         controller = MPPI(env, args)
@@ -394,24 +474,25 @@ def optimise_model(model, params, args, key):
 
         controller = CEM(env, args)
 
-    train_step_jit = jit(partial(train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
+    dynamics_train_step_jit = jit(partial(dynamics_train_step, n_batches = args.n_batches, chunk_length = args.chunk_length, time_steps = args.time_steps))
+    VAE_train_step_jit = jit(partial(VAE_train_step, n_batches = args.n_batches))
 
     for iteration in range(args.n_model_iterations):
 
         # periodically evaluate the model
         if iteration % args.render_every == 0:
 
-            evaluate_model(env, controller, state, iteration, args)
+            evaluate_model(env, controller, states[0], iteration, args)
 
         ###########################################
         ########## collect data ###################
         ###########################################
 
         # collect dataset
-        key, subkeys = keyGen(key, n_subkeys = args.n_updates + 1)
+        key, subkeys = keyGen(key, n_subkeys = args.n_updates * 2 + 1)
 
         data_start_time = time.time()
-        actions, observations, mean_cumulative_reward = collect_data(env, controller, state, next(subkeys), args)
+        actions, observations, mean_cumulative_reward = collect_data(env, controller, states[0], next(subkeys), args)
         print("time collecting data =",time.time() - data_start_time)
 
         print('iteration: {}, mean cumulative reward across rollouts: {:.4f}'.format(iteration, mean_cumulative_reward))
@@ -433,15 +514,22 @@ def optimise_model(model, params, args, key):
         ###########################################
 
         # initialise the losses and the timer
-        training_loss = 0
+        dynamics_training_loss = 0
+        VAE_training_loss = 0
         train_start_time = time.time()
         for update in range(args.n_updates):
 
-            # perform a parameter update
-            state, loss = train_step_jit(state, all_actions, all_observations, next(subkeys))
+            # perform a parameter update for the dynamics model
+            states[0], loss = dynamics_train_step_jit(states[0], all_actions, all_observations, next(subkeys))
 
-            # compute the average training loss
-            training_loss = (training_loss * update + loss) / (update + 1)
+            # compute the average training loss for the dynamics model
+            dynamics_training_loss = (dynamics_training_loss * update + loss) / (update + 1)
+
+            # perform a parameter update for the VAE
+            states[1], loss = VAE_train_step_jit(states[1], all_actions, next(subkeys))
+
+            # compute the average training loss for the VAE
+            VAE_training_loss = (VAE_training_loss * update + loss) / (update + 1)
 
             if update == args.n_updates - 1:
 
@@ -449,8 +537,12 @@ def optimise_model(model, params, args, key):
                 train_duration = time.time() - train_start_time
 
                 # print metrics
-                print_metrics("batch", train_duration, training_loss, batch_range = [update - args.print_every + 1, update], 
-                              lr = lr_scheduler(state.step - 1))
+                print_metrics("batch", train_duration, dynamics_training_loss, batch_range = [update - args.print_every + 1, update], 
+                              lr = lr_scheduler(states[0].step - 1))
+
+                # print metrics
+                print_metrics("batch", train_duration, VAE_training_loss, batch_range = [update - args.print_every + 1, update], 
+                              lr = lr_scheduler(states[1].step - 1))
 
                 # # training losses (average of 'print_every' batches)
                 # training_loss = training_loss + mse / args.print_every
@@ -485,7 +577,8 @@ def optimise_model(model, params, args, key):
         if iteration % args.checkpoint_every == 0:
 
             # save checkpoint
-            checkpoints.save_checkpoint(ckpt_dir = 'runs/' + args.folder_name + '/checkpoint', target = state, step = iteration)
+            ckptr.save('runs/' + args.folder_name + '/checkpoints/dynamics_model', states[0])
+            ckptr.save('runs/' + args.folder_name + '/checkpoints/VAE', states[1])
 
             # if epoch % 50 == 0:
 

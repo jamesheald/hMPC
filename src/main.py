@@ -13,6 +13,8 @@ import os
 # for CEM, warmstart variance too?
 # change GRU for transformer
 
+# consider using different learning rate schedulers and optimisers for different models eg vae vs dynamics
+
 # save collected data so you can easily train GRUs/VAEs for testing ideas!!!
 
 # sort of checkpoints/gif savinsg etc to monitor progress
@@ -46,7 +48,7 @@ def main():
     parser = argparse.ArgumentParser(description = 'hyperparameters')
 
     # directories
-    parser.add_argument('--folder_name',                default = 'to_save_model')
+    parser.add_argument('--folder_name',                default = 'to_save_model_testVAE')
     parser.add_argument('--reload_state',               type = bool, default = False)
     parser.add_argument('--reload_folder_name',         default = 'saved_model')
 
@@ -70,7 +72,7 @@ def main():
     # env.sim.data.get_site_xpos(env.tracking_str)
 
     # MPC variables common to all MPC algorithms
-    parser.add_argument('--controller',                 default = 'CEM') # 'MPPI' or 'CEM'
+    parser.add_argument('--controller',                 default = 'MPPI') # 'MPPI' or 'CEM'
     parser.add_argument('--horizon',                    type = int, default = 50) # 7
     parser.add_argument('--n_sequences',                type = int, default = 200)
     parser.add_argument('--ground_truth_dynamics',      type = bool, default = False)
@@ -84,6 +86,12 @@ def main():
     parser.add_argument('--CEM_iterations',             type = int, default = 3)
     parser.add_argument('--noise_std_CEM',              type = float, default = 0.1)
 
+    # VAE
+    parser.add_argument('--action_encoder_hidden_dim',  type = int, default = 4)
+    parser.add_argument('--action_code_dim',            type = int, default = 2)
+    parser.add_argument('--action_decoder_hidden_dim',  type = int, default = 4)
+    parser.add_argument('--prior_z_log_var',            type = float, default = -2.0)
+
     # optimisation
     parser.add_argument('--adam_b1',                    type = float, default = 0.9)
     parser.add_argument('--adam_b2',                    type = float, default = 0.999)
@@ -93,7 +101,7 @@ def main():
     parser.add_argument('--step_size',                  type = float, default = 0.001)
     parser.add_argument('--decay_steps',                type = int, default = 1)
     parser.add_argument('--decay_factor',               type = float, default = 1) # 0.9999 (1 is constant learning rate)
-    parser.add_argument('--n_model_iterations',         type = int, default = 1000)
+    parser.add_argument('--n_model_iterations',         type = int, default = 250)
     parser.add_argument('--n_batches',                  type = int, default = 50)
     parser.add_argument('--chunk_length',               type = int, default = 50) # shouldn't this be equal to planning horizon?
     parser.add_argument('--n_updates',                  type = int, default = 100)
@@ -131,11 +139,11 @@ def main():
     # type help at a breakpoint() to see available commands
     # use xeus-python kernel -- Python 3.9 (XPython) -- for debugging
 
-    model, params, args, key = initialise_model(args)
+    models, params, args, key = initialise_model(args)
 
     # import jax
     # jax.profiler.start_trace('runs/' + folder_name)
-    optimise_model(model, params, args, key)
+    optimise_model(models, params, args, key)
     # jax.profiler.stop_trace()
 
     # from train import render_rollout, get_train_state
